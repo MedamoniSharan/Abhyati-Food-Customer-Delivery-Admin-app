@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Abhyati Delivery</string>
+    <string name="title_activity_main">Abhyati Delivery</string>
+    <string name="package_name">com.abhyati.deliverydriver</string>
+    <string name="custom_url_scheme">com.abhyati.deliverydriver</string>
+</resources>
