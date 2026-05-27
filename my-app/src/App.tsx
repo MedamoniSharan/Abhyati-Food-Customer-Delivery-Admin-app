@@ -4,12 +4,14 @@ import { useToast } from './contexts/ToastContext'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { AuthScreen } from './screens/AuthScreen'
 import { AccountScreen } from './screens/AccountScreen'
-import { CartScreen } from './screens/CartScreen'
+import { CartScreen, type CheckoutPaymentMode } from './screens/CartScreen'
 import { HomeScreen } from './screens/HomeScreen'
 import { OrdersScreen } from './screens/OrdersScreen'
 import { ProductDetailsScreen } from './screens/ProductDetailsScreen'
 import type { CartItem, Order, Product, Screen } from './types/app'
 import { createCustomerOrder, downloadOrderProof, fetchCustomerProductCategories, fetchZohoItemsPage, getBackendOrders } from './services/backendApi'
+import { createRazorpayOrder, verifyRazorpayPayment } from './services/paymentApi'
+import { openRazorpayCheckout } from './utils/razorpayCheckout'
 import { fetchAuthMe } from './services/authApi'
 import type { AuthUser } from './services/authApi'
 import { checkBackendReachable } from './utils/backendHealth'
@@ -22,6 +24,7 @@ function App() {
   const [screen, setScreen] = useState<Screen>('home')
   const [isAuthenticated, setIsAuthenticated] = useState(readSignedIn)
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(() => (readSignedIn() ? readSessionUser() : null))
+  const [checkoutBusy, setCheckoutBusy] = useState(false)
   const [serverCategoryNames, setServerCategoryNames] = useState<string[]>([])
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([])
   const [orderHistory, setOrderHistory] = useState<Order[]>([])
@@ -326,7 +329,7 @@ function App() {
     setScreen('cart')
   }
 
-  async function handleCheckout() {
+  async function handleCheckout(mode: CheckoutPaymentMode = 'pay_later') {
     if (cartItems.length === 0) {
       showToast('Your cart is empty. Add items before checkout.', { variant: 'warning' })
       return
@@ -353,22 +356,50 @@ function App() {
       setScreen('settings')
       return
     }
+
+    const lineItems = cartItems.map((line) => ({
+      item_id: line.product.zohoItemId,
+      name: line.product.name,
+      description: line.product.subtitle,
+      quantity: line.quantity,
+      rate: Number(line.product.priceInr) || 0
+    }))
+
+    setCheckoutBusy(true)
     try {
-      await createCustomerOrder(
-        cartItems.map((line) => ({
-          item_id: line.product.zohoItemId,
-          name: line.product.name,
-          description: line.product.subtitle,
-          quantity: line.quantity,
-          rate: Number(line.product.priceInr) || 0
-        }))
-      )
+      if (mode === 'pay_later') {
+        await createCustomerOrder(lineItems)
+        setCartItems([])
+        await refreshOrderHistory()
+        setScreen('orders')
+        showToast('Order placed successfully and synced to admin.', { variant: 'success' })
+        return
+      }
+
+      const rzpOrder = await createRazorpayOrder(lineItems)
+      const paymentResult = await openRazorpayCheckout({
+        keyId: rzpOrder.key_id,
+        orderId: rzpOrder.order_id,
+        amount: rzpOrder.amount,
+        currency: rzpOrder.currency,
+        user: freshUser
+      })
+      await verifyRazorpayPayment({
+        razorpay_order_id: paymentResult.razorpay_order_id,
+        razorpay_payment_id: paymentResult.razorpay_payment_id,
+        razorpay_signature: paymentResult.razorpay_signature
+      })
       setCartItems([])
       await refreshOrderHistory()
       setScreen('orders')
-      showToast('Order placed successfully and synced to admin.', { variant: 'success' })
+      showToast('Payment successful. Order placed and synced to admin.', { variant: 'success' })
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Checkout failed. Please try again.', { variant: 'error' })
+      const message = error instanceof Error ? error.message : 'Checkout failed. Please try again.'
+      if (message !== 'Payment cancelled') {
+        showToast(message, { variant: 'error' })
+      }
+    } finally {
+      setCheckoutBusy(false)
     }
   }
 
@@ -446,7 +477,8 @@ function App() {
           onBackHome={() => setScreen('home')}
           onIncrease={(productId) => updateCartQuantity(productId, 'increase')}
           onDecrease={(productId) => updateCartQuantity(productId, 'decrease')}
-          onCheckout={() => void handleCheckout()}
+          onCheckout={(mode) => void handleCheckout(mode)}
+          checkoutBusy={checkoutBusy}
         />
       )
     }

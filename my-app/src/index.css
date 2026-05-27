@@ -1407,10 +1407,54 @@ body {
   background: #fff;
   padding: 12px 16px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
+}
+
+.cart-footer-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cart-payment-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cart-payment-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.cart-payment-option.is-active {
+  border-color: var(--accent, #c45c26);
+  background: rgba(196, 92, 38, 0.08);
+  color: #9a3412;
+}
+
+.cart-payment-option input {
+  accent-color: var(--accent, #c45c26);
+}
+
+.cart-footer-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.cart-footer .btn {
+  width: 100%;
 }
 
 .cart-footer small {

@@ -9,6 +9,8 @@
     "smoke:drivers": "node scripts/smoke-admin-drivers.mjs",
     "smoke:customers": "node scripts/smoke-admin-customers.mjs",
     "smoke:order-flow": "node scripts/smoke-order-flow.mjs",
+    "smoke:razorpay-verify": "node scripts/smoke-razorpay-verify.mjs",
+    "smoke:razorpay-order": "node scripts/smoke-razorpay-order.mjs",
     "zoho:pricing-env": "node scripts/show-zoho-pricing-env.mjs",
     "zoho:item-customer-name-env": "node scripts/show-zoho-item-customer-name-env.mjs",
     "zoho:setup-item-customer-display-field": "node scripts/setup-zoho-item-customer-display-field.mjs",
@@ -29,6 +31,7 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
     "proper-lockfile": "^4.1.2",
+    "razorpay": "^2.9.6",
     "zod": "^3.23.8"
   },
   "devDependencies": {

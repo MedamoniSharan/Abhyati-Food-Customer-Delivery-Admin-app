@@ -59,7 +59,15 @@ const envSchema = z.object({
    */
   ZOHO_PRODUCT_CATEGORIES_CONTACT_ID: z.string().optional(),
   ZOHO_CUSTOM_FIELD_PRODUCT_CATEGORIES_JSON_ID: z.string().optional(),
-  ZOHO_CUSTOM_FIELD_ITEM_CATEGORY_NAME_ID: z.string().optional()
+  ZOHO_CUSTOM_FIELD_ITEM_CATEGORY_NAME_ID: z.string().optional(),
+
+  /** Razorpay online payments (optional — required for Pay now checkout) */
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+
+  /** Zoho Books bank account for recording Razorpay customer payments */
+  ZOHO_PAYMENT_ACCOUNT_ID: z.string().optional()
 })
 
 const parsed = envSchema.safeParse(process.env)

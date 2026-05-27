@@ -49,6 +49,28 @@ type ZohoInvoiceRow = {
   total?: number
   reference_number?: string
   salesorder_number?: string
+  app_payment?: {
+    method?: string
+    status?: string
+    razorpayPaymentId?: string | null
+    paidAt?: string | null
+    label?: string
+  }
+}
+
+function formatPaymentLabel(inv: ZohoInvoiceRow): string {
+  const app = inv.app_payment
+  if (app?.label) return app.label
+  const status = String(inv.status || '').toLowerCase()
+  if (status.includes('paid')) return 'Paid'
+  return 'Credit'
+}
+
+function formatPaidAt(value?: string | null): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString()
 }
 
 type AuthUser = { id: string; fullName: string; email: string }
@@ -1494,6 +1516,9 @@ export default function App() {
                       <th>Order / ref</th>
                       <th>Customer</th>
                       <th>Status</th>
+                      <th>Payment</th>
+                      <th>Payment ID</th>
+                      <th>Paid at</th>
                       <th>Due</th>
                       <th>Amount</th>
                       <th>Assign</th>
@@ -1502,7 +1527,7 @@ export default function App() {
                   <tbody>
                     {invoicesPaged.pageRows.length === 0 ? (
                       <tr>
-                        <td colSpan={8} style={{ color: 'var(--admin-muted)', padding: '16px 12px' }}>
+                        <td colSpan={11} style={{ color: 'var(--admin-muted)', padding: '16px 12px' }}>
                           No invoices loaded. Use Refresh or check Zoho Books connection.
                         </td>
                       </tr>
@@ -1516,6 +1541,9 @@ export default function App() {
                           <td>{inv.salesorder_number ?? inv.reference_number ?? '—'}</td>
                           <td>{inv.customer_name ?? '—'}</td>
                           <td>{inv.status ?? '—'}</td>
+                          <td>{formatPaymentLabel(inv)}</td>
+                          <td>{inv.app_payment?.razorpayPaymentId ?? '—'}</td>
+                          <td>{formatPaidAt(inv.app_payment?.paidAt)}</td>
                           <td>{inv.due_date ?? '—'}</td>
                           <td>{formatMoneyInr(Number(inv.total))}</td>
                           <td>

@@ -3,6 +3,7 @@ import express from 'express'
 import { authRoutes } from './routes/authRoutes.js'
 import { adminRoutes } from './routes/adminRoutes.js'
 import { customerRoutes } from './routes/customerRoutes.js'
+import { paymentRoutes } from './routes/paymentRoutes.js'
 import { deliveryAuthRoutes } from './routes/deliveryAuthRoutes.js'
 import { env } from './config/env.js'
 import { createLogger, serializeError } from './util/logger.js'
@@ -37,6 +38,7 @@ app.use('/health', healthRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/customer', customerRoutes)
+app.use('/api/customer/payments', paymentRoutes)
 app.use('/api/delivery', deliveryAuthRoutes)
 app.use('/api/items', itemImageRoutes)
 app.use('/api/zoho', requireAdmin, zohoRoutes)

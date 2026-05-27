@@ -1,16 +1,28 @@
+import { useState } from 'react'
 import { ProductImage } from '../components/ProductImage'
 import type { CartItem } from '../types/app'
 import { formatInr } from '../utils/currency'
+
+export type CheckoutPaymentMode = 'pay_now' | 'pay_later'
 
 type Props = {
   cartItems: CartItem[]
   onBackHome: () => void
   onIncrease: (productId: string | number) => void
   onDecrease: (productId: string | number) => void
-  onCheckout: () => void
+  onCheckout: (mode: CheckoutPaymentMode) => void
+  checkoutBusy?: boolean
 }
 
-export function CartScreen({ cartItems, onBackHome, onIncrease, onDecrease, onCheckout }: Props) {
+export function CartScreen({
+  cartItems,
+  onBackHome,
+  onIncrease,
+  onDecrease,
+  onCheckout,
+  checkoutBusy = false
+}: Props) {
+  const [paymentMode, setPaymentMode] = useState<CheckoutPaymentMode>('pay_now')
   const grandTotal = cartItems.reduce((sum, item) => sum + item.product.priceInr * item.quantity, 0)
 
   return (
@@ -58,12 +70,43 @@ export function CartScreen({ cartItems, onBackHome, onIncrease, onDecrease, onCh
 
       {cartItems.length > 0 ? (
         <div className="cart-footer">
-          <div>
-            <small>Total</small>
-            <strong>{formatInr(grandTotal)}</strong>
+          <div className="cart-footer-main">
+            <div className="cart-payment-mode" role="radiogroup" aria-label="Payment method">
+              <label className={`cart-payment-option${paymentMode === 'pay_now' ? ' is-active' : ''}`}>
+                <input
+                  type="radio"
+                  name="payment-mode"
+                  value="pay_now"
+                  checked={paymentMode === 'pay_now'}
+                  onChange={() => setPaymentMode('pay_now')}
+                  disabled={checkoutBusy}
+                />
+                Pay now (Razorpay)
+              </label>
+              <label className={`cart-payment-option${paymentMode === 'pay_later' ? ' is-active' : ''}`}>
+                <input
+                  type="radio"
+                  name="payment-mode"
+                  value="pay_later"
+                  checked={paymentMode === 'pay_later'}
+                  onChange={() => setPaymentMode('pay_later')}
+                  disabled={checkoutBusy}
+                />
+                Pay later (invoice)
+              </label>
+            </div>
+            <div className="cart-footer-total">
+              <small>Total</small>
+              <strong>{formatInr(grandTotal)}</strong>
+            </div>
           </div>
-          <button type="button" className="btn btn-accent" onClick={onCheckout}>
-            Checkout
+          <button
+            type="button"
+            className="btn btn-accent"
+            disabled={checkoutBusy}
+            onClick={() => onCheckout(paymentMode)}
+          >
+            {checkoutBusy ? 'Processing…' : paymentMode === 'pay_now' ? 'Pay & place order' : 'Place order'}
           </button>
         </div>
       ) : null}

@@ -3,21 +3,23 @@ import { z } from 'zod'
 import { requireActiveCustomer, requireCustomer } from '../middleware/requireCustomer.js'
 import { listAssignments } from '../services/deliveryAssignmentStore.js'
 import {
-  createInvoice,
-  createSalesOrder,
   ensureCustomerContact,
   getInvoiceAttachment,
   getModuleById,
-  listModule,
-  resolveDefaultSalespersonFieldsForTransactions
+  listModule
 } from '../services/zohoBooksService.js'
-import { createInventoryAdjustmentsForDeliveredLines } from '../services/zohoInventoryPodService.js'
 import {
-  applyCustomerPrice,
   applyTierToItemsResponse,
   applyTierToSingleItemResponse,
   getActiveTierForCustomerEmail
 } from '../services/customerPricingZohoService.js'
+import {
+  adjustInventoryForCheckout,
+  createZohoOrderAndInvoice,
+  resolveCheckoutLineItems,
+  resolveCustomerContactForCheckout
+} from '../services/orderCheckoutService.js'
+import { compareOrderDateDesc, mapInvoiceToOrder } from '../services/orderMapping.js'
 import {
   enrichCustomerItemsResponse,
   enrichCustomerSingleItemResponse,
@@ -63,56 +65,6 @@ function invoiceBelongsToAppCustomer(invoice, customerEmail, zohoCustomerId) {
   const zid = String(zohoCustomerId || '').trim()
   if (zid && String(invoice?.customer_id || '').trim() === zid) return true
   return false
-}
-
-function compareOrderDateDesc(a, b) {
-  const ta = Date.parse(String(a?.date || '')) || 0
-  const tb = Date.parse(String(b?.date || '')) || 0
-  return tb - ta
-}
-
-function buildOrderItemsLabel(lineItems) {
-  if (!Array.isArray(lineItems) || lineItems.length === 0) return 'Items'
-  return lineItems
-    .slice(0, 3)
-    .map((line) => {
-      const qty = Number(line?.quantity) || 1
-      const name = line?.name || line?.description || 'Item'
-      return `${qty}x ${name}`
-    })
-    .join(', ')
-}
-
-function mapStatus(invoiceStatus, assignmentStatus) {
-  const status = String(assignmentStatus || invoiceStatus || '').toLowerCase()
-  if (status.includes('deliver')) return 'Delivered'
-  if (status.includes('transit') || status.includes('ship') || status.includes('sent')) return 'Shipped'
-  return 'Processing'
-}
-
-function mapInvoiceToOrder(invoice, assignment) {
-  const invoiceId = String(invoice?.invoice_id || '')
-  const lineItems = Array.isArray(invoice?.line_items) ? invoice.line_items : []
-  const proof = assignment?.proof || null
-  return {
-    id: invoiceId,
-    invoiceId,
-    invoiceNumber: String(invoice?.invoice_number || invoice?.reference_number || invoiceId),
-    date: String(invoice?.date || invoice?.invoice_date || ''),
-    status: mapStatus(invoice?.status, assignment?.status),
-    items: buildOrderItemsLabel(lineItems),
-    amountInr: Number(invoice?.total) || 0,
-    deliveredAt: assignment?.deliveredAt || null,
-    proofAvailable: Boolean(proof),
-    proofMeta: proof
-      ? {
-          fileName: proof.fileName || '',
-          mimeType: proof.mimeType || '',
-          uploadedAt: proof.uploadedAt || null,
-          recipientName: proof.recipientName || ''
-        }
-      : null
-  }
 }
 
 function normalizeCategoryNameQuery(value) {
@@ -254,76 +206,25 @@ customerRoutes.post('/orders', async (req, res, next) => {
   try {
     const body = createOrderSchema.parse(req.body)
     const customer = req.customer
-    const contact = await ensureCustomerContact({
-      fullName: customer.fullName,
-      email: customer.email
+    const { customerId } = await resolveCustomerContactForCheckout(customer)
+    const resolvedLines = await resolveCheckoutLineItems(body.line_items, customer.email)
+
+    const { salesOrderData, invoice, salesorder } = await createZohoOrderAndInvoice({
+      customerId,
+      resolvedLines,
+      referenceNumber: body.reference_number
     })
-    const customerId = String(contact?.contact_id || '')
-    if (!customerId) {
-      const err = new Error('Unable to resolve customer contact in Zoho')
-      err.statusCode = 502
-      throw err
-    }
 
-    const tier = await getActiveTierForCustomerEmail(req.customer.email)
-    const resolvedLines = await Promise.all(
-      body.line_items.map(async (line) => {
-        const itemId = line.item_id
-        if (!itemId) return line
-        const itemData = await getModuleById('/items', String(itemId))
-        const item = itemData?.item || itemData
-        const base = Number(item?.rate ?? item?.sales_rate ?? line.rate ?? 0)
-        const rate = applyCustomerPrice(base, tier)
-        return {
-          item_id: String(itemId),
-          quantity: line.quantity,
-          rate,
-          ...(line.name ? { name: line.name } : item?.name ? { name: String(item.name) } : {}),
-          ...(line.description
-            ? { description: line.description }
-            : item?.description
-              ? { description: String(item.description) }
-              : {})
-        }
-      })
-    )
-
-    const salesOrderPayload = {
-      customer_id: customerId,
-      reference_number: body.reference_number,
-      line_items: resolvedLines
-    }
-    const invoicePayload = {
-      customer_id: customerId,
-      reference_number: body.reference_number,
-      line_items: resolvedLines
-    }
-    const spFields = await resolveDefaultSalespersonFieldsForTransactions()
-    if (spFields) {
-      Object.assign(salesOrderPayload, spFields)
-      Object.assign(invoicePayload, spFields)
-    }
-
-    const [salesOrderData, invoiceData] = await Promise.all([
-      createSalesOrder(salesOrderPayload),
-      createInvoice(invoicePayload)
-    ])
-
-    const invoice = invoiceData?.invoice || invoiceData
     const order = invoice ? mapInvoiceToOrder(invoice, null) : null
     const refLabel =
       String(
         invoice?.invoice_number || invoice?.reference_number || body.reference_number || 'app-order'
       ).trim() || 'app-order'
-    const inventory_adjustments = await createInventoryAdjustmentsForDeliveredLines(
-      resolvedLines,
-      refLabel,
-      'Checkout'
-    )
+    const inventory_adjustments = await adjustInventoryForCheckout(resolvedLines, refLabel)
 
     res.status(201).json({
       message: 'Order created',
-      salesorder: salesOrderData?.salesorder || salesOrderData,
+      salesorder,
       invoice,
       inventory_adjustments,
       ...(order ? { order } : {})

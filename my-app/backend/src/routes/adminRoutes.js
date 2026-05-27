@@ -58,6 +58,7 @@ import {
   withItemProductCategoryVirtual
 } from '../services/productCategoryZohoService.js'
 import { createAssignment, getAssignmentById, listAssignments } from '../services/deliveryAssignmentStore.js'
+import { paymentsByInvoiceIdMap } from '../services/paymentRecordStore.js'
 import {
   addPricingTier,
   deletePricingTier,
@@ -890,7 +891,23 @@ adminRoutes.get('/invoices', async (req, res, next) => {
   try {
     const query = z.object({}).passthrough().parse(req.query)
     const data = await listModule('/invoices', { per_page: 200, ...query })
-    res.json(data)
+    const paymentMap = paymentsByInvoiceIdMap()
+    const rows = Array.isArray(data?.invoices) ? data.invoices : []
+    const invoices = rows.map((inv) => {
+      const payment = paymentMap.get(String(inv.invoice_id || '')) || null
+      if (!payment) return inv
+      return {
+        ...inv,
+        app_payment: {
+          method: payment.method,
+          status: payment.status,
+          razorpayPaymentId: payment.razorpayPaymentId,
+          paidAt: payment.paidAt,
+          label: payment.status === 'paid' ? 'Paid online' : payment.status === 'pending' ? 'Pending' : 'Online'
+        }
+      }
+    })
+    res.json({ ...data, invoices })
   } catch (error) {
     next(error)
   }
