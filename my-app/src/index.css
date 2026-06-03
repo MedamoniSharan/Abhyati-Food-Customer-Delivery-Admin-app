@@ -1995,6 +1995,30 @@ body[data-toast-layout='main'] .app-toast-host {
   box-shadow: 0 16px 28px rgba(0, 0, 0, 0.24);
 }
 
+.auth-form-card--scroll {
+  max-height: min(92dvh, 720px);
+  overflow-y: auto;
+}
+
+.auth-textarea {
+  resize: vertical;
+  min-height: 56px;
+  font-family: inherit;
+  line-height: 1.35;
+  border-radius: 16px;
+  margin: 0 0 10px;
+  padding: 10px 14px;
+}
+
+.auth-form-card .auth-input + .auth-input,
+.auth-form-card .auth-input + .auth-password-field,
+.auth-form-card .auth-password-field + .auth-input,
+.auth-form-card .auth-password-field + .auth-password-field,
+.auth-form-card .auth-textarea + .auth-input,
+.auth-form-card .auth-input + .auth-textarea {
+  margin-top: 10px;
+}
+
 .auth-logo-top {
   width: 72px;
   height: 72px;

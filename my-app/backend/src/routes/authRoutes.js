@@ -5,6 +5,7 @@ import {
   getCustomerContactForApp,
   getCustomerUserByEmail,
   loginCustomerUser,
+  signupCustomerUser,
   updateCustomerUserByEmail
 } from '../services/authStore.js'
 import { signCustomerToken, verifyCustomerToken } from '../services/jwtService.js'
@@ -13,6 +14,19 @@ import { getActiveTierForContact, isCustomerPricingConfigured } from '../service
 const loginSchema = z.object({
   email: z.string().email('Valid email is required'),
   password: z.string().min(1, 'Password is required')
+})
+
+const signupSchema = z.object({
+  fullName: z.string().trim().min(2, 'Full name is required'),
+  email: z.string().email('Valid email is required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  mobile: z
+    .string()
+    .trim()
+    .min(8, 'Mobile number is required')
+    .max(50, 'Mobile number is too long')
+    .refine((v) => /\d/.test(v), { message: 'Enter a valid mobile number' }),
+  deliveryAddress: z.string().max(2000).optional()
 })
 
 const profilePatchSchema = z.object({
@@ -32,10 +46,19 @@ function normEmail(e) {
 
 export const authRoutes = Router()
 
-authRoutes.post('/signup', (_req, res) => {
-  res.status(403).json({
-    message: 'Self-service signup is disabled. Ask an administrator to create your account.'
-  })
+authRoutes.post('/signup', async (req, res, next) => {
+  try {
+    const input = signupSchema.parse(req.body)
+    const { user } = await signupCustomerUser(input)
+    const token = signCustomerToken(user.email)
+    res.status(201).json({
+      message: 'Account created successfully',
+      user,
+      token
+    })
+  } catch (error) {
+    next(error)
+  }
 })
 
 authRoutes.post('/login', async (req, res, next) => {

@@ -10,6 +10,7 @@ import {
   CUST_PW_PREFIX
 } from './zohoAppCredentialNotes.js'
 import {
+  deleteModule,
   ensureCustomerContact,
   findCustomerByEmail,
   getModuleById,
@@ -143,6 +144,97 @@ export async function createCustomerUser({ email, password, contactId: explicitC
   await attachCustomerCredentialOnZoho(contact.contact_id, password)
   const fresh = (await getModuleById('/contacts', contact.contact_id)).contact
   return toPublicUserFromContact(fresh || contact)
+}
+
+/**
+ * Self-service signup: ensures Zoho customer contact + app password in notes.
+ * @returns {{ user: object, zohoContactCreated: boolean }}
+ */
+export async function signupCustomerUser({ fullName, email, password, mobile, deliveryAddress }) {
+  const normalizedEmail = normalizeEmail(email)
+  const prior = await findCustomerByEmail(normalizedEmail)
+  const zohoContactCreated = !prior?.contact_id
+
+  if (prior?.contact_id) {
+    const data = await getModuleById('/contacts', prior.contact_id)
+    const c = data?.contact || data || prior
+    if (parseDriverPasswordHashFromNotes(c.notes)) {
+      const err = new Error('This email is registered as a driver. Use the driver app or another email.')
+      err.statusCode = 409
+      throw err
+    }
+    if (parseCustomerPasswordHashFromNotes(c.notes)) {
+      const err = new Error('An account with this email already exists. Log in instead.')
+      err.statusCode = 409
+      throw err
+    }
+    if (c.is_active === false || c.is_active === 'false') {
+      const err = new Error('This customer account is inactive. Contact support.')
+      err.statusCode = 400
+      throw err
+    }
+  }
+
+  const mob = String(mobile ?? '').trim()
+  if (!mob || mob.length < 8) {
+    const err = new Error('Mobile number is required')
+    err.statusCode = 400
+    throw err
+  }
+
+  const contact = await ensureCustomerContact({
+    fullName: String(fullName || '').trim(),
+    email: normalizedEmail,
+    mobile: mob
+  })
+  if (!contact?.contact_id) {
+    const err = new Error('Could not create your account. Try again later.')
+    err.statusCode = 502
+    throw err
+  }
+
+  const addr = typeof deliveryAddress === 'string' ? deliveryAddress.trim() : ''
+
+  try {
+    // Persist mobile (and optional address) on the Zoho Books contact before app-login hash.
+    await updateCustomerUserByEmail(normalizedEmail, {
+      mobile: mob,
+      ...(addr ? { deliveryAddress: addr } : {})
+    })
+
+    let user = await createCustomerUser({
+      email: normalizedEmail,
+      password,
+      contactId: contact.contact_id
+    })
+    user =
+      (await updateCustomerUserByEmail(normalizedEmail, {
+        mobile: mob,
+        ...(addr ? { deliveryAddress: addr } : {})
+      })) || user
+    return { user, zohoContactCreated }
+  } catch (err) {
+    if (zohoContactCreated) {
+      try {
+        await deleteModule('/contacts', contact.contact_id)
+      } catch {
+        try {
+          await updateModule('/contacts', contact.contact_id, {
+            contact_id: contact.contact_id,
+            is_active: false
+          })
+        } catch {
+          /* best-effort rollback */
+        }
+      }
+    }
+    if (err?.message === 'App login already set for this Zoho customer') {
+      const friendly = new Error('An account with this email already exists. Log in instead.')
+      friendly.statusCode = 409
+      throw friendly
+    }
+    throw err
+  }
 }
 
 export async function loginCustomerUser({ email, password }) {

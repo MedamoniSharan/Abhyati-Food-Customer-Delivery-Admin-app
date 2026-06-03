@@ -41,7 +41,7 @@ Backend runs at `http://localhost:4000` by default.
 
 ### Test customer login (seeded on first backend start)
 
-After `npm run dev` in `backend/`, a default customer is created if missing (see `AUTH_DEFAULT_*` in `.env.example`). **Self-service signup is disabled**; create customers from the admin dashboard. **Delivery drivers** sign in with email/password against `POST /api/delivery/login` after an admin creates them (Zoho contact + driver record).
+After `npm run dev` in `backend/`, a default customer is created if missing (see `AUTH_DEFAULT_*` in `.env.example`). **Customers** can sign up in the app (`POST /api/auth/signup`) or be created from the admin dashboard. **Delivery drivers** sign in with email/password against `POST /api/delivery/login` after an admin creates them (Zoho contact + driver record).
 
 ### Required backend env values
 

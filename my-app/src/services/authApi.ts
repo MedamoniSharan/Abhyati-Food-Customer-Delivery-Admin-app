@@ -66,7 +66,7 @@ function formatAuthErrorMessage(data: ParsedBody, status: number): string {
   return msg
 }
 
-async function authRequest(path: string, payload: Record<string, string>): Promise<LoginResponse> {
+async function authRequest(path: string, payload: Record<string, string | undefined>): Promise<LoginResponse> {
   logApiCandidatesOnce(API_BASE_URL_CANDIDATES)
   let lastError: unknown = null
 
@@ -126,6 +126,26 @@ async function authRequest(path: string, payload: Record<string, string>): Promi
 
 export async function loginCustomer(payload: { email: string; password: string }): Promise<LoginResponse> {
   return authRequest('/api/auth/login', payload)
+}
+
+export type SignupPayload = {
+  fullName: string
+  email: string
+  password: string
+  mobile: string
+  deliveryAddress?: string
+}
+
+export async function signupCustomer(payload: SignupPayload): Promise<LoginResponse> {
+  const body: Record<string, string | undefined> = {
+    fullName: payload.fullName.trim(),
+    email: payload.email.trim(),
+    password: payload.password,
+    mobile: payload.mobile.trim()
+  }
+  const deliveryAddress = payload.deliveryAddress?.trim()
+  if (deliveryAddress) body.deliveryAddress = deliveryAddress
+  return authRequest('/api/auth/signup', body)
 }
 
 export async function fetchAuthMe(token: string): Promise<AuthUser | null> {
