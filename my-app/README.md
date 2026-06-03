@@ -41,7 +41,7 @@ Backend runs at `http://localhost:4000` by default.
 
 ### Test customer login (seeded on first backend start)
 
-After `npm run dev` in `backend/`, a default customer is created if missing (see `AUTH_DEFAULT_*` in `.env.example`). **Customers** can sign up in the app (`POST /api/auth/signup`) with **MSG91 OTP** (mobile) plus email/password login, or be created from the admin dashboard. Configure `MSG91_AUTH_KEY` and `MSG91_TEMPLATE_ID` in `backend/.env` (see `.env.example`). **Delivery drivers** sign in with email/password against `POST /api/delivery/login` after an admin creates them (Zoho contact + driver record).
+After `npm run dev` in `backend/`, a default customer is created if missing (see `AUTH_DEFAULT_*` in `.env.example`). **Customers** can sign up in the app (`POST /api/auth/signup`) with email and password, or be created from the admin dashboard. **Delivery drivers** sign in with email/password against `POST /api/delivery/login` after an admin creates them (Zoho contact + driver record).
 
 ### Required backend env values
 

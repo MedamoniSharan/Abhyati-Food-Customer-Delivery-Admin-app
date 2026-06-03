@@ -2111,39 +2111,6 @@ body[data-toast-layout='main'] .app-toast-host {
   text-align: center;
 }
 
-.auth-mode-tabs {
-  display: flex;
-  gap: 8px;
-  margin: 0 0 12px;
-  padding: 4px;
-  border-radius: 999px;
-  background: #f3f4f6;
-}
-
-.auth-mode-tab {
-  flex: 1;
-  border: 0;
-  border-radius: 999px;
-  min-height: 40px;
-  font-weight: 700;
-  font-size: 0.9rem;
-  background: transparent;
-  color: #6b7280;
-  cursor: pointer;
-}
-
-.auth-mode-tab--active {
-  background: #facc15;
-  color: #111827;
-}
-
-.auth-otp-input {
-  letter-spacing: 0.2em;
-  text-align: center;
-  font-size: 1.1rem;
-  font-weight: 700;
-}
-
 .auth-primary-btn:disabled {
   opacity: 0.75;
 }

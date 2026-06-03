@@ -13,13 +13,10 @@ import {
   deleteModule,
   ensureCustomerContact,
   findCustomerByEmail,
-  findCustomerByMobile,
   getModuleById,
   listContactsDetailBySearchText,
   updateModule
 } from './zohoBooksService.js'
-import { phonesMatch } from '../util/phone.js'
-import { verifyOtpForMobile, isMsg91Configured, isMsg91DevBypass } from './msg91OtpService.js'
 
 const log = createLogger('auth')
 
@@ -104,44 +101,6 @@ export async function getCustomerContactForApp(email) {
   return c
 }
 
-/** Customer contact with app login, matched by mobile number in Zoho. */
-export async function getCustomerContactForAppByMobile(mobile) {
-  const listed = await findCustomerByMobile(mobile)
-  if (!listed?.contact_id) return null
-  const data = await getModuleById('/contacts', String(listed.contact_id))
-  const c = data?.contact || data
-  if (!c?.contact_id) return null
-  if (c.is_active === false || c.is_active === 'false') return null
-  if (parseDriverPasswordHashFromNotes(c.notes)) return null
-  if (parseCustomerPasswordHashFromNotes(c.notes) == null) return null
-  if (!phonesMatch(pickMobileFromContact(c), mobile)) return null
-  return c
-}
-
-export async function getCustomerUserByMobile(mobile) {
-  const contact = await getCustomerContactForAppByMobile(mobile)
-  return contact ? toPublicUserFromContact(contact) : null
-}
-
-export async function loginCustomerUserByMobile(mobile) {
-  const contact = await getCustomerContactForAppByMobile(mobile)
-  if (!contact) {
-    const error = new Error('No account found with this mobile number')
-    error.statusCode = 404
-    throw error
-  }
-  return toPublicUserFromContact(contact)
-}
-
-export function customerOtpRequired() {
-  return isMsg91Configured() || isMsg91DevBypass()
-}
-
-export async function assertCustomerOtpVerified(mobile, otp) {
-  if (!customerOtpRequired()) return
-  await verifyOtpForMobile(mobile, otp)
-}
-
 /**
  * Writes app-login password hash into Zoho contact `notes` (customer marker).
  */
@@ -191,9 +150,8 @@ export async function createCustomerUser({ email, password, contactId: explicitC
  * Self-service signup: ensures Zoho customer contact + app password in notes.
  * @returns {{ user: object, zohoContactCreated: boolean }}
  */
-export async function signupCustomerUser({ fullName, email, password, mobile, deliveryAddress, otp }) {
+export async function signupCustomerUser({ fullName, email, password, mobile, deliveryAddress }) {
   const normalizedEmail = normalizeEmail(email)
-  await assertCustomerOtpVerified(mobile, otp)
   const prior = await findCustomerByEmail(normalizedEmail)
   const zohoContactCreated = !prior?.contact_id
 

@@ -1,6 +1,5 @@
 import axios from 'axios'
 import { env } from '../config/env.js'
-import { phoneLast10, phonesMatch } from '../util/phone.js'
 import { getZohoAccessToken } from './zohoAuthService.js'
 
 async function request(method, path, { params, data } = {}) {
@@ -82,48 +81,6 @@ export async function findContactByEmail(email, contactType) {
 
 export async function findCustomerByEmail(email) {
   return findContactByEmail(email, 'customer')
-}
-
-function pickMobileFromZohoContact(contact) {
-  const root =
-    String(contact?.mobile ?? '').trim() ||
-    String(contact?.phone ?? '').trim() ||
-    String(contact?.work_phone ?? '').trim()
-  if (root) return root
-  const persons = Array.isArray(contact?.contact_persons) ? contact.contact_persons : []
-  const primary = persons.find((p) => p?.is_primary_contact === true) || persons[0]
-  return String(primary?.mobile ?? primary?.phone ?? '').trim()
-}
-
-function contactMatchesMobile(contact, mobile) {
-  if (!contact || !mobile) return false
-  const target = phoneLast10(mobile)
-  if (target.length < 8) return false
-  return phonesMatch(pickMobileFromZohoContact(contact), target)
-}
-
-/** Find active customer contact by mobile (last 10 digits). */
-export async function findCustomerByMobile(mobile) {
-  const last10 = phoneLast10(mobile)
-  if (last10.length < 8) return null
-  const organizationId = await getOrganizationId()
-  const maxPages = 4
-  for (let page = 1; page <= maxPages; page += 1) {
-    const data = await request('get', '/contacts', {
-      params: {
-        organization_id: organizationId,
-        contact_type: 'customer',
-        search_text: last10,
-        per_page: 200,
-        page
-      }
-    })
-    const contacts = Array.isArray(data?.contacts) ? data.contacts : []
-    const match = contacts.find((c) => contactMatchesMobile(c, last10))
-    if (match) return match
-    if (contacts.length < 200) break
-  }
-  return null
 }
 
 /**
