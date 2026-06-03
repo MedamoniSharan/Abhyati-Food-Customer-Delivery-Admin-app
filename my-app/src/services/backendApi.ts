@@ -43,6 +43,8 @@ type ZohoSalesOrder = {
     mimeType?: string
     uploadedAt?: string | null
     recipientName?: string
+    hasSignature?: boolean
+    notes?: string
   } | null
   line_items?: Array<{ name?: string; quantity?: number }>
   items?: string
@@ -79,8 +81,9 @@ function mapZohoItemToProduct(item: ZohoItem, index: number): Product {
 
 function mapStatus(rawStatus?: string): Order['status'] {
   const status = (rawStatus || '').toLowerCase()
-  if (status.includes('deliver')) return 'Delivered'
-  if (status.includes('ship')) return 'Shipped'
+  if (status === 'delivered' || status.includes('deliver')) return 'Delivered'
+  if (status === 'in_transit' || status.includes('transit') || status.includes('ship')) return 'Shipped'
+  if (status === 'accepted') return 'Shipped'
   return 'Processing'
 }
 
@@ -217,6 +220,20 @@ export async function fetchZohoItemDetail(itemId: string): Promise<Record<string
   }
 }
 
+export async function fetchCustomerInvoice(invoiceId: string): Promise<Record<string, unknown> | null> {
+  if (!invoiceId) return null
+  try {
+    const data = await request<Record<string, unknown>>(
+      `/api/customer/invoices/${encodeURIComponent(invoiceId)}`
+    )
+    const nested = data['invoice'] as Record<string, unknown> | undefined
+    if (nested && typeof nested === 'object') return nested
+    return data
+  } catch {
+    return null
+  }
+}
+
 export async function getBackendOrders(): Promise<Order[]> {
   try {
     const response = await request<{ orders?: ZohoSalesOrder[] }>('/api/customer/orders?per_page=200')
@@ -244,6 +261,53 @@ export async function createCustomerOrder(lineItems: CheckoutLineInput[]): Promi
   const raw = data.order
   if (raw && typeof raw === 'object') {
     return mapZohoSalesOrderToOrder(raw, 0)
+  }
+  return null
+}
+
+export type OrderProofSummary = {
+  invoiceNumber?: string
+  recipientName?: string
+  uploadedAt?: string | null
+  deliveredAt?: string | null
+  total?: number
+  hasPhoto?: boolean
+  hasSignature?: boolean
+  fileName?: string
+}
+
+export async function fetchOrderProofSummary(invoiceId: string): Promise<OrderProofSummary | null> {
+  if (!invoiceId) return null
+  try {
+    const data = await request<{ summary?: OrderProofSummary }>(
+      `/api/customer/orders/${encodeURIComponent(invoiceId)}/proof/summary`
+    )
+    return data.summary && typeof data.summary === 'object' ? data.summary : null
+  } catch {
+    return null
+  }
+}
+
+/** Load proof image for inline display (caller must revoke object URL). */
+export async function fetchOrderProofAsset(
+  invoiceId: string,
+  kind: 'photo' | 'signature'
+): Promise<Blob | null> {
+  if (!invoiceId) return null
+  logApiCandidatesOnce(API_BASE_URL_CANDIDATES)
+  const token = readAuthToken()
+  const path = `/api/customer/orders/${encodeURIComponent(invoiceId)}/proof/${kind}`
+  for (const baseUrl of API_BASE_URL_CANDIDATES) {
+    try {
+      const url = `${baseUrl.replace(/\/$/, '')}${path}`
+      const headers = new Headers()
+      if (token) headers.set('Authorization', `Bearer ${token}`)
+      const response = await fetch(url, { headers })
+      if (!response.ok) continue
+      return await response.blob()
+    } catch {
+      /* try next base */
+    }
   }
   return null
 }

@@ -53,10 +53,21 @@ export function errorHandler(error, req, res, _next) {
       path,
       ...serializeAxiosError(error)
     })
+    const zohoBody = error.response?.data
+    const zohoMsg =
+      typeof zohoBody === 'object' && zohoBody != null && typeof zohoBody.message === 'string'
+        ? zohoBody.message
+        : ''
+    const needsAuthHint =
+      rawStatus === 401 ||
+      (typeof zohoBody === 'object' && zohoBody != null && Number(zohoBody.code) === 57) ||
+      /not authorized/i.test(zohoMsg)
     return res.status(status).json({
       message: 'Zoho API request failed',
-      zoho: error.response?.data || error.message,
-      ...(rawStatus === 401 ? { zoho_auth_hint: 'Check ZOHO_REFRESH_TOKEN and OAuth scopes (Books full access).' } : {})
+      zoho: zohoBody || error.message,
+      ...(needsAuthHint
+        ? { zoho_auth_hint: 'Check ZOHO_REFRESH_TOKEN and OAuth scopes (Books full access).' }
+        : {})
     })
   }
 

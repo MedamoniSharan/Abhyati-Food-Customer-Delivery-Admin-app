@@ -926,14 +926,80 @@ adminRoutes.get('/delivery-assignments/:id/proof', async (req, res, next) => {
       err.statusCode = 404
       throw err
     }
-    const attachment = await getInvoiceAttachment(row.invoiceId)
-    if (attachment.contentDisposition) {
-      res.setHeader('Content-Disposition', attachment.contentDisposition)
-    } else {
-      res.setHeader('Content-Disposition', `attachment; filename="${row.proof.fileName || 'proof.jpg'}"`)
+    const { resolveProofPhotoResponse } = await import('../services/deliveryProofHttp.js')
+    const photo = await resolveProofPhotoResponse(row)
+    if (!photo) {
+      const err = new Error('Proof photo not found')
+      err.statusCode = 404
+      throw err
     }
-    res.setHeader('Content-Type', attachment.contentType)
-    res.send(attachment.data)
+    res.setHeader('Content-Type', photo.contentType)
+    res.setHeader('Content-Disposition', `inline; filename="${photo.fileName}"`)
+    res.send(photo.data)
+  } catch (error) {
+    next(error)
+  }
+})
+
+adminRoutes.get('/delivery-assignments/:id/proof/photo', async (req, res, next) => {
+  try {
+    const id = z.string().min(1).parse(req.params.id)
+    const row = getAssignmentById(id)
+    if (!row?.proof) {
+      const err = new Error('Proof not found for this assignment')
+      err.statusCode = 404
+      throw err
+    }
+    const { resolveProofPhotoResponse } = await import('../services/deliveryProofHttp.js')
+    const photo = await resolveProofPhotoResponse(row)
+    if (!photo) {
+      const err = new Error('Proof photo not found')
+      err.statusCode = 404
+      throw err
+    }
+    res.setHeader('Content-Type', photo.contentType)
+    res.setHeader('Content-Disposition', `inline; filename="${photo.fileName}"`)
+    res.send(photo.data)
+  } catch (error) {
+    next(error)
+  }
+})
+
+adminRoutes.get('/delivery-assignments/:id/proof/signature', async (req, res, next) => {
+  try {
+    const id = z.string().min(1).parse(req.params.id)
+    const row = getAssignmentById(id)
+    if (!row?.proof) {
+      const err = new Error('Proof not found for this assignment')
+      err.statusCode = 404
+      throw err
+    }
+    const { resolveProofSignatureResponse } = await import('../services/deliveryProofHttp.js')
+    const sig = await resolveProofSignatureResponse(row)
+    if (!sig) {
+      const err = new Error('Signature not found for this assignment')
+      err.statusCode = 404
+      throw err
+    }
+    res.setHeader('Content-Type', sig.contentType)
+    res.setHeader('Content-Disposition', `inline; filename="${sig.fileName}"`)
+    res.send(sig.data)
+  } catch (error) {
+    next(error)
+  }
+})
+
+adminRoutes.get('/delivery-assignments/:id/proof/summary', async (req, res, next) => {
+  try {
+    const id = z.string().min(1).parse(req.params.id)
+    const row = getAssignmentById(id)
+    if (!row?.proof) {
+      const err = new Error('Proof not found for this assignment')
+      err.statusCode = 404
+      throw err
+    }
+    const { buildProofSummary } = await import('../services/deliveryProofHttp.js')
+    res.json({ summary: buildProofSummary(row) })
   } catch (error) {
     next(error)
   }

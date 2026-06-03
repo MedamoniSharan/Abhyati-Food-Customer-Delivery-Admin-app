@@ -208,10 +208,23 @@ export async function getDeliveryStopDetail(stopId: string): Promise<DeliverySto
   return all.find((s) => s.id === stopId) || null
 }
 
-export async function confirmDeliveryStop(stopId: string, recipientName: string, photo: File, notes?: string): Promise<void> {
+export async function confirmDeliveryStop(
+  stopId: string,
+  recipientName: string,
+  photo: File,
+  signature?: Blob | File | null,
+  notes?: string
+): Promise<void> {
   const form = new FormData()
   form.append('photo', photo)
   form.append('recipient_name', recipientName)
+  if (signature) {
+    const sigFile =
+      signature instanceof File
+        ? signature
+        : new File([signature], 'signature.png', { type: signature.type || 'image/png' })
+    form.append('signature', sigFile)
+  }
   if (notes) form.append('notes', notes)
   await requestWithInit<{ message: string }>(`/api/delivery/assignments/${encodeURIComponent(stopId)}/proof`, {
     method: 'POST',

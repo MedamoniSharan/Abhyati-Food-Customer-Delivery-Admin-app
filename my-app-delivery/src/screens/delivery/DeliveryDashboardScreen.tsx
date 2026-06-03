@@ -13,6 +13,8 @@ type Props = {
   onStartNavigation: () => void
   onCallCurrent: () => void
   onViewAllDeliveries: () => void
+  onViewPendingDeliveries: () => void
+  onViewCompletedDeliveries: () => void
   onNotify: (message: string) => void
 }
 
@@ -25,6 +27,8 @@ export function DeliveryDashboardScreen({
   onStartNavigation,
   onCallCurrent,
   onViewAllDeliveries,
+  onViewPendingDeliveries,
+  onViewCompletedDeliveries,
   onNotify,
 }: Props) {
   const pendingStops = Math.max(totalStops - completedStops, 0)
@@ -86,7 +90,12 @@ export function DeliveryDashboardScreen({
               <span className="material-symbols-outlined">local_shipping</span>
             </div>
           </div>
-          <div className="dd-stat-card">
+          <button
+            type="button"
+            className="dd-stat-card dd-stat-card-btn"
+            onClick={onViewCompletedDeliveries}
+            aria-label={`View ${completedStops} completed deliveries`}
+          >
             <div className="dd-stat-label">
               <span
                 className="material-symbols-outlined"
@@ -97,8 +106,13 @@ export function DeliveryDashboardScreen({
               Completed
             </div>
             <p className="dd-stat-value">{completedStops}</p>
-          </div>
-          <div className="dd-stat-card">
+          </button>
+          <button
+            type="button"
+            className="dd-stat-card dd-stat-card-btn"
+            onClick={onViewPendingDeliveries}
+            aria-label={`View ${pendingStops} pending deliveries`}
+          >
             <div className="dd-stat-label">
               <span
                 className="material-symbols-outlined"
@@ -109,7 +123,7 @@ export function DeliveryDashboardScreen({
               Pending
             </div>
             <p className="dd-stat-value">{pendingStops}</p>
-          </div>
+          </button>
         </div>
 
         <div className="dd-section-title">
@@ -171,8 +185,8 @@ export function DeliveryDashboardScreen({
               </div>
             </div>
             <button type="button" className="dd-accent-btn" style={{ marginTop: 18 }} onClick={onStartNavigation} disabled={!currentStop}>
-              <span className="material-symbols-outlined">navigation</span>
-              Start Navigation
+              <span className="material-symbols-outlined">map</span>
+              View Map
             </button>
           </div>
         </div>

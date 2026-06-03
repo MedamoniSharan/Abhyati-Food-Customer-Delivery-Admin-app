@@ -37,7 +37,13 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
   }
 }
 
-type ParsedBody = { message?: string; user?: AuthUser; token?: string }
+type ParsedBody = {
+  message?: string
+  user?: AuthUser
+  token?: string
+  zoho?: { message?: string }
+  zoho_auth_hint?: string
+}
 
 function parseJsonBody(text: string): ParsedBody {
   if (!text.trim()) return {}
@@ -46,6 +52,18 @@ function parseJsonBody(text: string): ParsedBody {
   } catch {
     return {}
   }
+}
+
+function formatAuthErrorMessage(data: ParsedBody, status: number): string {
+  let msg = data.message || `Request failed with status ${status}`
+  const zm = data.zoho?.message
+  if (typeof zm === 'string' && zm.trim()) msg = zm.trim()
+  const hint = data.zoho_auth_hint
+  if (typeof hint === 'string' && hint.trim()) return `${msg}. ${hint.trim()}`
+  if (status === 502) {
+    return `${msg} Start the backend (cd my-app/backend && npm run dev) and use VITE_API_BASE_URL=http://localhost:3001 in my-app/.env.`
+  }
+  return msg
 }
 
 async function authRequest(path: string, payload: Record<string, string>): Promise<LoginResponse> {
@@ -64,7 +82,7 @@ async function authRequest(path: string, payload: Record<string, string>): Promi
       const data = parseJsonBody(text)
 
       if (!response.ok) {
-        const msg = data.message || `Request failed with status ${response.status}`
+        const msg = formatAuthErrorMessage(data, response.status)
         if (response.status >= 400 && response.status < 500) {
           throw new AuthClientError(msg)
         }

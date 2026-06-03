@@ -35,6 +35,8 @@ export type Order = {
     mimeType?: string
     uploadedAt?: string | null
     recipientName?: string
+    hasSignature?: boolean
+    notes?: string
   } | null
 }
 

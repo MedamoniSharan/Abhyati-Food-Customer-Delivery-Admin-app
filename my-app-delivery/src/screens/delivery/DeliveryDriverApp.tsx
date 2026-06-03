@@ -9,7 +9,7 @@ import {
   updateDeliveryStopStatus,
   type DeliveryStop,
 } from '../../services/deliveryBackendApi'
-import { AssignedDeliveriesScreen } from './AssignedDeliveriesScreen'
+import { AssignedDeliveriesScreen, type DeliveriesStatusFilter } from './AssignedDeliveriesScreen'
 import { DeliveryBottomNav, type DriverTab } from './DeliveryBottomNav'
 import { DeliveryDashboardScreen } from './DeliveryDashboardScreen'
 import { DeliveryDetailScreen } from './DeliveryDetailScreen'
@@ -25,6 +25,7 @@ type Props = {
 
 export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }: Props) {
   const [tab, setTab] = useState<DriverTab>('dashboard')
+  const [deliveriesFilter, setDeliveriesFilter] = useState<DeliveriesStatusFilter>('all')
   const [detailStopId, setDetailStopId] = useState<string | null>(null)
   const [podStopId, setPodStopId] = useState<string | null>(null)
   const [routeMapQuery, setRouteMapQuery] = useState<string | null>(null)
@@ -53,15 +54,65 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
     return activeStops[0] ?? null
   }, [deliveredStops, activeStops])
 
-  async function refreshStops(quiet?: boolean) {
+  async function refreshStops(quiet?: boolean): Promise<DeliveryStop[]> {
     if (!quiet) setLoadingStops(true)
     try {
       const data = await getDeliveryStops()
       setStops(data)
+      return data
     } catch {
       onNotify('Could not load deliveries')
+      return stops
     } finally {
       if (!quiet) setLoadingStops(false)
+    }
+  }
+
+  function openProofForStop(stopId: string) {
+    const stop = stops.find((s) => s.id === stopId)
+    if (!stop) {
+      onNotify('Delivery not found')
+      return
+    }
+    if (stop.statusTag === 'Assigned') {
+      onNotify('Accept this delivery first')
+      return
+    }
+    if (stop.statusTag === 'Delivered' && stop.proofUploaded) {
+      onNotify('This delivery is already completed')
+      return
+    }
+    setDetailStopId(stopId)
+    setPodStopId(stopId)
+  }
+
+  function openRouteMap(mapsQuery?: string) {
+    const query = String(mapsQuery || '').trim() || nextStopMapsQuery()
+    if (!query) {
+      onNotify('No route available')
+      return
+    }
+    setRouteMapQuery(query)
+  }
+
+  async function acceptStopAndOpenMap(stopId: string) {
+    const fallbackQuery = stops.find((s) => s.id === stopId)?.mapsQuery
+    setAcceptingId(stopId)
+    try {
+      await acceptDeliveryStop(stopId)
+      try {
+        await updateDeliveryStopStatus(stopId, 'in_transit')
+      } catch {
+        /* map still opens if status update fails */
+      }
+      const refreshed = await refreshStops(true)
+      onNotify('Delivery accepted — opening map')
+      const target = refreshed.find((s) => s.id === stopId)
+      openRouteMap(target?.mapsQuery || fallbackQuery)
+    } catch {
+      onNotify('Could not accept delivery')
+    } finally {
+      setAcceptingId(null)
     }
   }
 
@@ -208,6 +259,11 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
     setPodStopId(null)
   }
 
+  function handleTabChange(next: DriverTab) {
+    setTab(next)
+    if (next !== 'deliveries') setDeliveriesFilter('all')
+  }
+
   if (detailStopId && !detail && loadingDetail) {
     return (
       <div className="driver-app">
@@ -217,7 +273,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
             <span>Loading delivery…</span>
           </div>
         </div>
-        <DeliveryBottomNav active={tab} onChange={setTab} onScan={openScanner} />
+        <DeliveryBottomNav active={tab} onChange={handleTabChange} onScan={openScanner} />
       </div>
     )
   }
@@ -229,11 +285,11 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
           <ProofOfDeliveryScreen
             detail={podDetail}
             onBack={() => setPodStopId(null)}
-            onConfirm={async (recipient, photo) => {
+            onConfirm={async (recipient, photo, signature) => {
               if (!podDetail.id) return
               setConfirming(true)
               try {
-                await confirmDeliveryStop(podDetail.id, recipient, photo)
+                await confirmDeliveryStop(podDetail.id, recipient, photo, signature)
                 onNotify('Signed invoice uploaded to Zoho Books')
                 await refreshStops(true)
                 closeOverlays()
@@ -259,28 +315,9 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
           <DeliveryDetailScreen
             detail={detail}
             onBack={() => setDetailStopId(null)}
-            onAccept={async () => {
-              setAcceptingId(detail.id)
-              try {
-                await acceptDeliveryStop(detail.id)
-                onNotify('Delivery accepted')
-                await refreshStops(true)
-              } catch {
-                onNotify('Could not accept delivery')
-              } finally {
-                setAcceptingId(null)
-              }
-            }}
+            onAccept={() => acceptStopAndOpenMap(detail.id)}
             accepting={acceptingId === detail.id}
-            onStartNavigation={async () => {
-              try {
-                await updateDeliveryStopStatus(detail.id, 'in_transit')
-                await refreshStops(true)
-              } catch {
-                onNotify('Could not update status; opening maps anyway')
-              }
-              openNavigation(detail.mapsQuery)
-            }}
+            onViewMap={() => openRouteMap(detail.mapsQuery)}
             onOpenProof={() => {
               if (detail.statusTag === 'Delivered' && detail.proofUploaded) {
                 onNotify('Receipt is already saved in Zoho Books')
@@ -322,15 +359,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
                 onNotify('Accept a delivery from the list first')
                 return
               }
-              void (async () => {
-                try {
-                  await updateDeliveryStopStatus(stop.id, 'in_transit')
-                  await refreshStops(true)
-                } catch {
-                  onNotify('Could not update status; opening maps anyway')
-                }
-                openNavigation(stop.mapsQuery)
-              })()
+              openRouteMap(stop.mapsQuery)
             }}
             onCallCurrent={() => {
               const stop = activeStops.find((s) => s.isNext) ?? activeStops[0]
@@ -340,7 +369,18 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
               }
               callCustomer(stop.phone)
             }}
-            onViewAllDeliveries={() => setTab('deliveries')}
+            onViewAllDeliveries={() => {
+              setDeliveriesFilter('all')
+              setTab('deliveries')
+            }}
+            onViewPendingDeliveries={() => {
+              setDeliveriesFilter('pending')
+              setTab('deliveries')
+            }}
+            onViewCompletedDeliveries={() => {
+              setDeliveriesFilter('completed')
+              setTab('deliveries')
+            }}
             onNotify={onNotify}
           />
         ) : null}
@@ -348,29 +388,16 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
           <AssignedDeliveriesScreen
             stops={stops}
             loading={loadingStops}
+            statusFilter={deliveriesFilter}
             onOpenStop={(id) => setDetailStopId(id)}
-            onAcceptStop={async (id) => {
-              setAcceptingId(id)
-              try {
-                await acceptDeliveryStop(id)
-                onNotify('Delivery accepted')
-                await refreshStops(true)
-              } catch {
-                onNotify('Could not accept delivery')
-              } finally {
-                setAcceptingId(null)
-              }
-            }}
+            onCompleteStop={openProofForStop}
+            onAcceptStop={(id) => acceptStopAndOpenMap(id)}
             acceptingId={acceptingId}
-            onBackToDashboard={() => setTab('dashboard')}
-            onViewMap={(hint) => {
-              const query = (hint && hint.trim()) || nextStopMapsQuery()
-              if (!query) {
-                onNotify('No route available')
-                return
-              }
-              setRouteMapQuery(query)
+            onBackToDashboard={() => {
+              setDeliveriesFilter('all')
+              setTab('dashboard')
             }}
+            onViewMap={(hint) => openRouteMap(hint)}
             onNotify={onNotify}
           />
         ) : null}
@@ -425,7 +452,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
           </>
         ) : null}
       </div>
-      <DeliveryBottomNav active={tab} onChange={setTab} onScan={openScanner} />
+      <DeliveryBottomNav active={tab} onChange={handleTabChange} onScan={openScanner} />
 
       {scannerOpen ? (
         <div className="dd-scanner-overlay" role="dialog" aria-modal="true" aria-label="Scanner">
@@ -465,6 +492,18 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
           <div className="dd-map-overlay-body">
             <DeliveryGoogleMap destination={routeMapQuery} />
           </div>
+          {(() => {
+            const mapStop = activeStops.find((s) => s.mapsQuery?.trim() === routeMapQuery.trim())
+            if (!mapStop || mapStop.statusTag === 'Delivered') return null
+            return (
+              <footer className="dd-footer-fixed">
+                <button type="button" className="dd-accent-btn" onClick={() => openProofForStop(mapStop.id)}>
+                  <span className="material-symbols-outlined">check_circle</span>
+                  Complete delivery
+                </button>
+              </footer>
+            )
+          })()}
         </div>
       ) : null}
 

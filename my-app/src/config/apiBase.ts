@@ -18,9 +18,10 @@ export function logApiCandidatesOnce(bases: string[]): void {
   console.log('[API] API URL:', primary)
 }
 
-/** Single backend origin — Render production API. */
+/** Backend origin(s). Dev defaults to same-origin (Vite proxy) unless `VITE_API_BASE_URL` is set. */
 export function getApiBaseCandidates(): string[] {
   const fromEnv = trimBase(import.meta.env.VITE_API_BASE_URL || '')
-  const base = fromEnv || PUBLIC_API_BASE_URL
-  return [base]
+  if (fromEnv) return [fromEnv]
+  if (import.meta.env.DEV) return ['']
+  return [PUBLIC_API_BASE_URL]
 }

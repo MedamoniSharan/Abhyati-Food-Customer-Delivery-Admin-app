@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { adminDownload } from '../adminApi'
 import { AdminBusyOverlay, AdminInlineSpinner } from './AdminDataLoader'
 
@@ -18,7 +19,16 @@ export type DeliveryAssignmentRow = {
     mimeType?: string
     uploadedAt?: string | null
     notes?: string
+    signatureDocumentId?: string | null
+    storedInZoho?: boolean
   } | null
+}
+
+type ProofPreviewState = {
+  row: DeliveryAssignmentRow
+  photoUrl: string | null
+  signatureUrl: string | null
+  loading: boolean
 }
 
 type Paged<T> = { pageRows: T[]; totalPages: number; safePage: number }
@@ -45,6 +55,61 @@ export function AssignmentTrackingSection({
   assignmentsRefreshing = false,
   onToast,
 }: Props) {
+  const [preview, setPreview] = useState<ProofPreviewState | null>(null)
+
+  useEffect(() => {
+    if (!preview?.row.proof) return
+    let cancelled = false
+    let photoUrl: string | null = null
+    let signatureUrl: string | null = null
+
+    void (async () => {
+      try {
+        const photoBlob = await adminDownload(
+          `/api/admin/delivery-assignments/${encodeURIComponent(preview.row.id)}/proof/photo`
+        )
+        if (cancelled) return
+        photoUrl = URL.createObjectURL(photoBlob)
+        setPreview((p) => (p ? { ...p, photoUrl, loading: false } : p))
+
+        try {
+          const sigBlob = await adminDownload(
+            `/api/admin/delivery-assignments/${encodeURIComponent(preview.row.id)}/proof/signature`
+          )
+          if (cancelled) return
+          signatureUrl = URL.createObjectURL(sigBlob)
+          setPreview((p) => (p ? { ...p, signatureUrl } : p))
+        } catch {
+          /* signature optional for older deliveries */
+        }
+      } catch (e) {
+        if (!cancelled) {
+          onToast(e instanceof Error ? e.message : 'Could not load proof', 'error')
+          setPreview(null)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      if (photoUrl) URL.revokeObjectURL(photoUrl)
+      if (signatureUrl) URL.revokeObjectURL(signatureUrl)
+    }
+  }, [preview?.row.id, onToast])
+
+  function openProofPreview(row: DeliveryAssignmentRow) {
+    if (!row.proof) return
+    setPreview({ row, photoUrl: null, signatureUrl: null, loading: true })
+  }
+
+  function closeProofPreview() {
+    setPreview((p) => {
+      if (p?.photoUrl) URL.revokeObjectURL(p.photoUrl)
+      if (p?.signatureUrl) URL.revokeObjectURL(p.signatureUrl)
+      return null
+    })
+  }
+
   return (
     <>
       <h2 style={{ marginTop: 0 }}>Assignment tracking & proof</h2>
@@ -134,41 +199,47 @@ export function AssignmentTrackingSection({
                             Signed by {row.proof.recipientName}
                           </span>
                         ) : null}
+                        <span style={{ color: 'var(--admin-muted)', fontSize: '0.7rem' }}>Stored in Zoho Books</span>
                       </span>
                     ) : (
                       <span style={{ color: 'var(--admin-muted)' }}>Pending</span>
                     )}
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      className="admin-btn admin-btn--ghost admin-btn-inline"
-                      disabled={!row.proof}
-                      onClick={async () => {
-                        try {
-                          const blob = await adminDownload(
-                            `/api/admin/delivery-assignments/${encodeURIComponent(row.id)}/proof`
-                          )
-                          const objectUrl = URL.createObjectURL(blob)
-                          const link = document.createElement('a')
-                          link.href = objectUrl
-                          link.download = row.proof?.fileName || `proof-${row.invoiceNumber || row.id}.jpg`
-                          document.body.appendChild(link)
-                          link.click()
-                          document.body.removeChild(link)
-                          URL.revokeObjectURL(objectUrl)
-                        } catch (e) {
-                          onToast(e instanceof Error ? e.message : 'Proof download failed', 'error')
-                        }
-                      }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                      </svg>
-                      Download
-                    </button>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn--ghost admin-btn-inline"
+                        disabled={!row.proof}
+                        onClick={() => openProofPreview(row)}
+                      >
+                        View proof
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn--ghost admin-btn-inline"
+                        disabled={!row.proof}
+                        onClick={async () => {
+                          try {
+                            const blob = await adminDownload(
+                              `/api/admin/delivery-assignments/${encodeURIComponent(row.id)}/proof`
+                            )
+                            const objectUrl = URL.createObjectURL(blob)
+                            const link = document.createElement('a')
+                            link.href = objectUrl
+                            link.download = row.proof?.fileName || `proof-${row.invoiceNumber || row.id}.jpg`
+                            document.body.appendChild(link)
+                            link.click()
+                            document.body.removeChild(link)
+                            URL.revokeObjectURL(objectUrl)
+                          } catch (e) {
+                            onToast(e instanceof Error ? e.message : 'Proof download failed', 'error')
+                          }
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )
@@ -192,6 +263,59 @@ export function AssignmentTrackingSection({
           Next
         </button>
       </div>
+
+      {preview ? (
+        <div
+          className="admin-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Delivery proof"
+          onClick={closeProofPreview}
+        >
+          <div
+            className="admin-modal admin-proof-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+              <div>
+                <h3 style={{ margin: '0 0 6px' }}>Delivery proof · {preview.row.invoiceNumber || preview.row.invoiceId}</h3>
+                <p style={{ margin: 0, color: 'var(--admin-muted)', fontSize: '0.875rem' }}>
+                  {preview.row.customerName || preview.row.customerEmail || 'Customer'}
+                  {preview.row.proof?.recipientName ? ` · Signed by ${preview.row.proof.recipientName}` : ''}
+                </p>
+              </div>
+              <button type="button" className="admin-btn admin-btn--ghost" onClick={closeProofPreview}>
+                Close
+              </button>
+            </div>
+
+            {preview.loading ? (
+              <p style={{ margin: '20px 0', color: 'var(--admin-muted)' }}>Loading proof images…</p>
+            ) : (
+              <div className="admin-proof-grid">
+                <div>
+                  <p className="admin-proof-label">Signed invoice photo</p>
+                  {preview.photoUrl ? (
+                    <img src={preview.photoUrl} alt="Signed invoice" className="admin-proof-img" />
+                  ) : (
+                    <p style={{ color: 'var(--admin-muted)', fontSize: '0.875rem' }}>Photo not available.</p>
+                  )}
+                </div>
+                <div>
+                  <p className="admin-proof-label">Customer signature</p>
+                  {preview.signatureUrl ? (
+                    <img src={preview.signatureUrl} alt="Signature" className="admin-proof-img admin-proof-img--sig" />
+                  ) : (
+                    <p style={{ color: 'var(--admin-muted)', fontSize: '0.875rem' }}>
+                      No signature stored (older deliveries may only have the invoice photo).
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </>
   )
 }

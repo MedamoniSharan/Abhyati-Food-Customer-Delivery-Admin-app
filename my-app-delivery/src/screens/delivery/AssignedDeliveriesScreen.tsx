@@ -11,10 +11,14 @@ import {
   stopsForCalendarDay,
 } from '../../utils/deliveryCalendar'
 
+export type DeliveriesStatusFilter = 'all' | 'pending' | 'completed'
+
 type Props = {
   stops: DeliveryStop[]
   loading?: boolean
+  statusFilter?: DeliveriesStatusFilter
   onOpenStop: (stopId: string) => void
+  onCompleteStop?: (stopId: string) => void
   onAcceptStop?: (stopId: string) => void | Promise<void>
   acceptingId?: string | null
   onBackToDashboard: () => void
@@ -30,7 +34,9 @@ function normalizeCalendarDate(d: Date): Date {
 export function AssignedDeliveriesScreen({
   stops,
   loading,
+  statusFilter = 'all',
   onOpenStop,
+  onCompleteStop,
   onAcceptStop,
   acceptingId,
   onBackToDashboard,
@@ -56,10 +62,15 @@ export function AssignedDeliveriesScreen({
     })
   }, [selectedDate])
 
+  const filteredByStatus = useMemo(() => {
+    if (statusFilter === 'pending') return stops.filter((s) => s.statusTag !== 'Delivered')
+    if (statusFilter === 'completed') return stops.filter((s) => s.statusTag === 'Delivered')
+    return stopsForCalendarDay(stops, selectedDate)
+  }, [stops, selectedDate, statusFilter])
+
   const visibleStops = useMemo(() => {
-    const filtered = stopsForCalendarDay(stops, selectedDate)
     let nextAssigned = false
-    return filtered.map((s) => {
+    return filteredByStatus.map((s) => {
       if (s.statusTag === 'Delivered') return { ...s, isNext: false }
       if (!nextAssigned) {
         nextAssigned = true
@@ -67,15 +78,33 @@ export function AssignedDeliveriesScreen({
       }
       return { ...s, isNext: false }
     })
-  }, [stops, selectedDate])
+  }, [filteredByStatus])
 
-  const completedForDay = useMemo(() => completedCountForCalendarDay(stops, selectedDate), [stops, selectedDate])
+  const completedForDay = useMemo(() => {
+    if (statusFilter === 'completed') return visibleStops.length
+    if (statusFilter === 'pending') return 0
+    return completedCountForCalendarDay(stops, selectedDate)
+  }, [statusFilter, visibleStops.length, stops, selectedDate])
+
+  const screenTitle = useMemo(() => {
+    if (statusFilter === 'pending') return 'Pending Deliveries'
+    if (statusFilter === 'completed') return 'Completed Deliveries'
+    return 'Assigned Deliveries'
+  }, [statusFilter])
 
   const routeTitle = useMemo(() => {
+    if (statusFilter === 'pending') return 'Pending stops'
+    if (statusFilter === 'completed') return 'Completed stops'
     const today = normalizeCalendarDate(new Date())
     if (isSameLocalDay(selectedDate, today)) return "Today's Route"
     return `Route · ${new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).format(selectedDate)}`
-  }, [selectedDate])
+  }, [selectedDate, statusFilter])
+
+  const emptyMessage = useMemo(() => {
+    if (statusFilter === 'pending') return 'No pending deliveries right now.'
+    if (statusFilter === 'completed') return 'No completed deliveries yet.'
+    return 'No deliveries assigned.'
+  }, [statusFilter])
 
   return (
     <>
@@ -84,11 +113,12 @@ export function AssignedDeliveriesScreen({
           <button type="button" className="dd-icon-btn" aria-label="Back" onClick={onBackToDashboard}>
             <span className="material-symbols-outlined">arrow_back</span>
           </button>
-          <h1>Assigned Deliveries</h1>
+          <h1>{screenTitle}</h1>
           <button type="button" className="dd-icon-btn" aria-label="Search" onClick={() => onNotify('Search coming soon')}>
             <span className="material-symbols-outlined">search</span>
           </button>
         </div>
+        {statusFilter === 'all' ? (
         <div style={{ marginTop: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <button
@@ -128,6 +158,7 @@ export function AssignedDeliveriesScreen({
             ))}
           </div>
         </div>
+        ) : null}
       </header>
 
       <main className="dd-main">
@@ -203,7 +234,7 @@ export function AssignedDeliveriesScreen({
             ))}
           </>
         ) : null}
-        {!loading && visibleStops.length === 0 ? <p style={{ color: 'var(--dd-muted)' }}>No deliveries assigned.</p> : null}
+        {!loading && visibleStops.length === 0 ? <p style={{ color: 'var(--dd-muted)' }}>{emptyMessage}</p> : null}
         {!loading
           ? visibleStops.map((stop) => (
               <article key={stop.id} className={`dd-route-card ${stop.isNext ? 'next' : ''}`}>
@@ -272,14 +303,32 @@ export function AssignedDeliveriesScreen({
                           {acceptingId === stop.id ? '…' : 'Accept'}
                         </button>
                       ) : null}
-                      {stop.isNext && stop.statusTag !== 'Assigned' ? (
-                        <button type="button" className="dd-accent-btn" style={{ width: 'auto', padding: '10px 18px' }} onClick={() => onOpenStop(stop.id)}>
+                      {stop.statusTag !== 'Assigned' && stop.statusTag !== 'Delivered' && onCompleteStop ? (
+                        <button
+                          type="button"
+                          className="dd-accent-btn"
+                          style={{ width: 'auto', padding: '10px 14px' }}
+                          onClick={() => onCompleteStop(stop.id)}
+                        >
                           <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
-                            play_arrow
+                            check_circle
                           </span>
-                          Start
+                          Complete
                         </button>
-                      ) : (
+                      ) : null}
+                      {stop.isNext && stop.statusTag !== 'Assigned' && stop.statusTag !== 'Delivered' ? (
+                        <button
+                          type="button"
+                          className="dd-muted-btn"
+                          style={{ width: 'auto', padding: '10px 14px' }}
+                          onClick={() => onViewMap(stop.mapsQuery?.trim() || undefined)}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                            map
+                          </span>
+                          Map
+                        </button>
+                      ) : stop.statusTag === 'Delivered' ? null : (
                         <button type="button" className="dd-muted-btn" onClick={() => onOpenStop(stop.id)}>
                           Details
                         </button>

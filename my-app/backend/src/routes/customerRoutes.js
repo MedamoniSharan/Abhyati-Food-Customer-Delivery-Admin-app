@@ -20,6 +20,7 @@ import {
   resolveCustomerContactForCheckout
 } from '../services/orderCheckoutService.js'
 import { compareOrderDateDesc, mapInvoiceToOrder } from '../services/orderMapping.js'
+import { hydrateInvoicesWithLineItems } from '../services/orderInvoiceHydrate.js'
 import {
   enrichCustomerItemsResponse,
   enrichCustomerSingleItemResponse,
@@ -246,8 +247,9 @@ customerRoutes.get('/orders', async (req, res, next) => {
     const data = await listModule('/invoices', { per_page: 200, ...query })
     const rows = Array.isArray(data?.invoices) ? data.invoices : []
     const invoices = rows.filter((invoice) => invoiceBelongsToAppCustomer(invoice, email, zohoCustomerId))
+    const { invoices: hydratedInvoices } = await hydrateInvoicesWithLineItems(invoices)
     const assignmentsByInvoice = new Map(listAssignments().map((row) => [String(row.invoiceId), row]))
-    const orders = invoices
+    const orders = hydratedInvoices
       .map((invoice) => mapInvoiceToOrder(invoice, assignmentsByInvoice.get(String(invoice.invoice_id))))
       .sort(compareOrderDateDesc)
     res.json({ orders })
@@ -296,35 +298,101 @@ customerRoutes.get('/invoices/:id', async (req, res, next) => {
   }
 })
 
+async function customerOrderProofContext(invoiceId, customerEmail, customerFullName) {
+  const data = await getModuleById('/invoices', invoiceId)
+  const invoice = data?.invoice || data
+  const contact = await ensureCustomerContact({
+    fullName: customerFullName,
+    email: customerEmail
+  })
+  const zohoCustomerId = String(contact?.contact_id || '')
+  if (!invoiceBelongsToAppCustomer(invoice, customerEmail, zohoCustomerId)) {
+    const err = new Error('Order proof not found')
+    err.statusCode = 404
+    throw err
+  }
+  const assignment = listAssignments().find((row) => String(row.invoiceId) === invoiceId)
+  if (!assignment?.proof) {
+    const err = new Error('Proof is not available yet')
+    err.statusCode = 404
+    throw err
+  }
+  return { invoice, assignment }
+}
+
 customerRoutes.get('/orders/:id/proof', async (req, res, next) => {
   try {
     const { id } = idParamSchema.parse(req.params)
-    const data = await getModuleById('/invoices', id)
-    const invoice = data?.invoice || data
-    const contact = await ensureCustomerContact({
-      fullName: req.customer.fullName,
-      email: req.customer.email
+    const { assignment } = await customerOrderProofContext(id, req.customer.email, req.customer.fullName)
+    const { resolveProofPhotoResponse } = await import('../services/deliveryProofHttp.js')
+    const photo = await resolveProofPhotoResponse(assignment)
+    if (!photo) {
+      const err = new Error('Proof photo not available')
+      err.statusCode = 404
+      throw err
+    }
+    res.setHeader('Content-Type', photo.contentType)
+    res.setHeader('Content-Disposition', `attachment; filename="${photo.fileName}"`)
+    res.send(photo.data)
+  } catch (error) {
+    next(error)
+  }
+})
+
+customerRoutes.get('/orders/:id/proof/photo', async (req, res, next) => {
+  try {
+    const { id } = idParamSchema.parse(req.params)
+    const { assignment } = await customerOrderProofContext(id, req.customer.email, req.customer.fullName)
+    const { resolveProofPhotoResponse } = await import('../services/deliveryProofHttp.js')
+    const photo = await resolveProofPhotoResponse(assignment)
+    if (!photo) {
+      const err = new Error('Proof photo not available')
+      err.statusCode = 404
+      throw err
+    }
+    res.setHeader('Content-Type', photo.contentType)
+    res.setHeader('Content-Disposition', `inline; filename="${photo.fileName}"`)
+    res.send(photo.data)
+  } catch (error) {
+    next(error)
+  }
+})
+
+customerRoutes.get('/orders/:id/proof/signature', async (req, res, next) => {
+  try {
+    const { id } = idParamSchema.parse(req.params)
+    const { assignment } = await customerOrderProofContext(id, req.customer.email, req.customer.fullName)
+    const { resolveProofSignatureResponse } = await import('../services/deliveryProofHttp.js')
+    const sig = await resolveProofSignatureResponse(assignment)
+    if (!sig) {
+      const err = new Error('Signature not available')
+      err.statusCode = 404
+      throw err
+    }
+    res.setHeader('Content-Type', sig.contentType)
+    res.setHeader('Content-Disposition', `inline; filename="${sig.fileName}"`)
+    res.send(sig.data)
+  } catch (error) {
+    next(error)
+  }
+})
+
+customerRoutes.get('/orders/:id/proof/summary', async (req, res, next) => {
+  try {
+    const { id } = idParamSchema.parse(req.params)
+    const { invoice, assignment } = await customerOrderProofContext(
+      id,
+      req.customer.email,
+      req.customer.fullName
+    )
+    const { buildProofSummary } = await import('../services/deliveryProofHttp.js')
+    res.json({
+      summary: {
+        ...buildProofSummary(assignment),
+        invoiceNumber: String(invoice?.invoice_number || assignment.invoiceNumber || id),
+        total: Number(invoice?.total) || Number(assignment.amount) || 0
+      }
     })
-    const zohoCustomerId = String(contact?.contact_id || '')
-    if (!invoiceBelongsToAppCustomer(invoice, req.customer.email, zohoCustomerId)) {
-      const err = new Error('Order proof not found')
-      err.statusCode = 404
-      throw err
-    }
-    const assignment = listAssignments().find((row) => String(row.invoiceId) === id)
-    if (!assignment?.proof) {
-      const err = new Error('Proof is not available yet')
-      err.statusCode = 404
-      throw err
-    }
-    const attachment = await getInvoiceAttachment(id)
-    if (attachment.contentDisposition) {
-      res.setHeader('Content-Disposition', attachment.contentDisposition)
-    } else {
-      res.setHeader('Content-Disposition', `attachment; filename="${assignment.proof.fileName || 'proof.jpg'}"`)
-    }
-    res.setHeader('Content-Type', attachment.contentType)
-    res.send(attachment.data)
   } catch (error) {
     next(error)
   }

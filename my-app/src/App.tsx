@@ -6,6 +6,7 @@ import { AuthScreen } from './screens/AuthScreen'
 import { AccountScreen } from './screens/AccountScreen'
 import { CartScreen, type CheckoutPaymentMode } from './screens/CartScreen'
 import { HomeScreen } from './screens/HomeScreen'
+import { OrderDetailsScreen } from './screens/OrderDetailsScreen'
 import { OrdersScreen } from './screens/OrdersScreen'
 import { ProductDetailsScreen } from './screens/ProductDetailsScreen'
 import type { CartItem, Order, Product, Screen } from './types/app'
@@ -28,6 +29,7 @@ function App() {
   const [serverCategoryNames, setServerCategoryNames] = useState<string[]>([])
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([])
   const [orderHistory, setOrderHistory] = useState<Order[]>([])
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string>('All Items')
@@ -209,6 +211,10 @@ function App() {
     if (!isAuthenticated || screen !== 'orders') return
     void refreshOrderHistory()
   }, [screen, isAuthenticated, refreshOrderHistory])
+
+  useEffect(() => {
+    if (screen !== 'orders') setSelectedOrder(null)
+  }, [screen])
 
   const loadMoreCatalogIfNeeded = useCallback(() => {
     if (!hasMoreCatalogItems) return
@@ -442,17 +448,28 @@ function App() {
       )
     }
 
+    if (screen === 'orders' && selectedOrder) {
+      return (
+        <OrderDetailsScreen
+          order={selectedOrder}
+          onBack={() => {
+            setSelectedOrder(null)
+            void refreshOrderHistory()
+          }}
+        />
+      )
+    }
+
     if (screen === 'orders') {
       return (
         <OrdersScreen
           orders={orderHistory}
-          onBackHome={() => setScreen('home')}
-          onTrackOrder={(order) =>
-            showToast(`Tracking started for Order #${order.id}`, { variant: 'info' })
-          }
-          onViewDetails={(order) =>
-            showToast(`Viewing details for Order #${order.id}`, { variant: 'info' })
-          }
+          onBackHome={() => {
+            setSelectedOrder(null)
+            setScreen('home')
+          }}
+          onTrackOrder={(order) => setSelectedOrder(order)}
+          onViewDetails={(order) => setSelectedOrder(order)}
           onInvoice={(order) =>
             void (async () => {
               const invoiceId = order.invoiceId || order.id

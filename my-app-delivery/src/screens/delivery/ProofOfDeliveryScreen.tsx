@@ -7,16 +7,19 @@ const INVOICE_PREVIEW =
 type Props = {
   detail: DeliveryStop
   onBack: () => void
-  onConfirm: (recipient: string, photo: File) => void
+  onConfirm: (recipient: string, photo: File, signature: Blob) => void
   onNotify: (message: string) => void
 }
 
 export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawing = useRef(false)
+  const hasSignature = useRef(false)
   const last = useRef<{ x: number; y: number } | null>(null)
   const [recipient, setRecipient] = useState('')
   const [invoicePhoto, setInvoicePhoto] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -47,6 +50,17 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
   }, [resizeCanvas])
 
   useEffect(() => {
+    if (!invoicePhoto) {
+      setPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(invoicePhoto)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [invoicePhoto])
+
+  useEffect(() => {
+    if (invoicePhoto) return
     async function requestCameraPermission() {
       if (!navigator.mediaDevices?.getUserMedia) return
       try {
@@ -57,7 +71,21 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
       }
     }
     requestCameraPermission()
-  }, [onNotify])
+  }, [invoicePhoto, onNotify])
+
+  function openPhotoPicker() {
+    photoInputRef.current?.click()
+  }
+
+  function handlePhotoChange(file: File | undefined) {
+    if (!file) return
+    setInvoicePhoto(file)
+  }
+
+  function retakePhoto() {
+    setInvoicePhoto(null)
+    if (photoInputRef.current) photoInputRef.current.value = ''
+  }
 
   function getPoint(e: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current
@@ -69,6 +97,7 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.currentTarget.setPointerCapture(e.pointerId)
     drawing.current = true
+    hasSignature.current = true
     last.current = getPoint(e)
   }
 
@@ -82,6 +111,7 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
     ctx.moveTo(last.current.x, last.current.y)
     ctx.lineTo(p.x, p.y)
     ctx.stroke()
+    hasSignature.current = true
     last.current = p
   }
 
@@ -100,6 +130,15 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx) return
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+    hasSignature.current = false
+  }
+
+  function exportSignatureBlob(): Promise<Blob | null> {
+    const canvas = canvasRef.current
+    if (!canvas) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), 'image/png')
+    })
   }
 
   return (
@@ -149,83 +188,60 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
           <p style={{ fontSize: '0.875rem', color: 'var(--dd-muted)', lineHeight: 1.5, marginBottom: 12 }}>
             Take a clear photo of the signed paper invoice for our records.
           </p>
-          <div className="dd-pod-camera">
-            <img src={INVOICE_PREVIEW} alt="" />
-            <div className="dd-pod-frame" />
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                zIndex: 2,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                padding: 16,
-                pointerEvents: 'none',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'flex-end', pointerEvents: 'auto' }}>
-                <button type="button" className="dd-icon-btn" style={{ background: 'rgba(0,0,0,0.45)', color: '#fff' }} onClick={() => onNotify('Flash')}>
-                  <span className="material-symbols-outlined">flash_on</span>
-                </button>
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  gap: 36,
-                  marginBottom: 8,
-                  pointerEvents: 'auto',
-                }}
-              >
-                <button
-                  type="button"
-                  className="dd-icon-btn"
-                  style={{ background: 'rgba(0,0,0,0.45)', color: '#fff' }}
-                  onClick={() => {
-                    const el = document.getElementById('pod-photo-input') as HTMLInputElement | null
-                    el?.click()
-                  }}
-                >
-                  <span className="material-symbols-outlined">image</span>
-                </button>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  style={{ display: 'none' }}
-                  id="pod-photo-input"
-                  onChange={(e) => setInvoicePhoto(e.target.files?.[0] ?? null)}
-                />
-                <button
-                  type="button"
-                  className="dd-icon-btn"
-                  style={{
-                    width: 64,
-                    height: 64,
-                    borderRadius: 999,
-                    border: '4px solid #fff',
-                    background: 'rgba(255,255,255,0.2)',
-                    color: '#fff',
-                  }}
-                  aria-label="Shutter"
-                  onClick={() => {
-                    const el = document.getElementById('pod-photo-input') as HTMLInputElement | null
-                    el?.click()
-                  }}
-                >
-                  <span style={{ width: 52, height: 52, borderRadius: 999, background: '#fff', display: 'block' }} />
-                </button>
-                <button type="button" className="dd-icon-btn" style={{ background: 'rgba(0,0,0,0.45)', color: '#fff' }} onClick={() => onNotify('Switch camera')}>
-                  <span className="material-symbols-outlined">cameraswitch</span>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="dd-pod-file-input"
+            onChange={(e) => handlePhotoChange(e.target.files?.[0])}
+          />
+          {previewUrl ? (
+            <div className="dd-pod-camera dd-pod-camera--preview">
+              <img src={previewUrl} alt="Signed invoice preview" className="dd-pod-preview-img" />
+              <div className="dd-pod-preview-bar">
+                <p className="dd-pod-preview-label">Invoice photo captured</p>
+                <button type="button" className="dd-pod-retake-btn" onClick={retakePhoto}>
+                  <span className="material-symbols-outlined">replay</span>
+                  Retake
                 </button>
               </div>
             </div>
-            <p style={{ margin: '10px 0 0', color: '#fff', fontSize: '0.78rem' }}>
-              {invoicePhoto ? `Selected: ${invoicePhoto.name}` : 'Capture or select signed invoice photo'}
-            </p>
-          </div>
+          ) : (
+            <div className="dd-pod-camera">
+              <img src={INVOICE_PREVIEW} alt="" className="dd-pod-camera-placeholder" />
+              <div className="dd-pod-frame" />
+              <div className="dd-pod-capture-ui">
+                <div className="dd-pod-capture-top">
+                  <button
+                    type="button"
+                    className="dd-icon-btn dd-pod-overlay-btn"
+                    aria-label="Flash"
+                    onClick={() => onNotify('Flash not available in browser preview')}
+                  >
+                    <span className="material-symbols-outlined">flash_on</span>
+                  </button>
+                </div>
+                <div className="dd-pod-capture-controls">
+                  <button type="button" className="dd-icon-btn dd-pod-overlay-btn" aria-label="Choose from gallery" onClick={openPhotoPicker}>
+                    <span className="material-symbols-outlined">image</span>
+                  </button>
+                  <button type="button" className="dd-pod-shutter" aria-label="Take photo" onClick={openPhotoPicker}>
+                    <span className="dd-pod-shutter-inner" />
+                  </button>
+                  <button
+                    type="button"
+                    className="dd-icon-btn dd-pod-overlay-btn"
+                    aria-label="Switch camera"
+                    onClick={() => onNotify('Use your device camera when taking the photo')}
+                  >
+                    <span className="material-symbols-outlined">cameraswitch</span>
+                  </button>
+                </div>
+              </div>
+              <p className="dd-pod-hint">Capture or select signed invoice photo</p>
+            </div>
+          )}
         </section>
 
         <div style={{ height: 1, background: 'var(--dd-border)', margin: '20px 0' }} />
@@ -282,15 +298,26 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
           type="button"
           className="dd-accent-btn"
           onClick={() => {
-            if (!recipient.trim()) {
-              onNotify('Please enter recipient name')
-              return
-            }
-            if (!invoicePhoto) {
-              onNotify('Please capture signed invoice photo')
-              return
-            }
-            onConfirm(recipient.trim(), invoicePhoto)
+            void (async () => {
+              if (!recipient.trim()) {
+                onNotify('Please enter recipient name')
+                return
+              }
+              if (!invoicePhoto) {
+                onNotify('Please capture signed invoice photo')
+                return
+              }
+              if (!hasSignature.current) {
+                onNotify('Please add customer signature')
+                return
+              }
+              const signature = await exportSignatureBlob()
+              if (!signature) {
+                onNotify('Could not export signature')
+                return
+              }
+              onConfirm(recipient.trim(), invoicePhoto, signature)
+            })()
           }}
         >
           Confirm Delivery

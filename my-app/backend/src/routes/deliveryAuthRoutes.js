@@ -14,7 +14,7 @@ import {
   updateAssignment
 } from '../services/deliveryAssignmentStore.js'
 import { signDriverToken } from '../services/jwtService.js'
-import { uploadInvoiceAttachment } from '../services/zohoBooksService.js'
+import { uploadFullDeliveryProofToZoho } from '../services/zohoDeliveryProofService.js'
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -186,7 +186,12 @@ deliveryAuthRoutes.patch('/assignments/:id/status', (req, res, next) => {
   }
 })
 
-deliveryAuthRoutes.post('/assignments/:id/proof', upload.single('photo'), async (req, res, next) => {
+const proofUpload = upload.fields([
+  { name: 'photo', maxCount: 1 },
+  { name: 'signature', maxCount: 1 }
+])
+
+deliveryAuthRoutes.post('/assignments/:id/proof', proofUpload, async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
     const row = getAssignmentById(id)
@@ -200,29 +205,42 @@ deliveryAuthRoutes.post('/assignments/:id/proof', upload.single('photo'), async 
       err.statusCode = 403
       throw err
     }
-    const file = req.file
-    if (!file) {
+    const files = req.files
+    const photo = files?.photo?.[0]
+    const signature = files?.signature?.[0]
+    if (!photo) {
       const err = new Error('Missing proof image')
       err.statusCode = 400
       throw err
     }
     const recipientName = typeof req.body?.recipient_name === 'string' ? req.body.recipient_name.trim() : ''
     const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim() : ''
-    const uploaded = await uploadInvoiceAttachment(row.invoiceId, {
-      buffer: file.buffer,
-      mimetype: file.mimetype,
-      originalname: file.originalname || 'signed-invoice.jpg'
+    const zohoProof = await uploadFullDeliveryProofToZoho(row.invoiceId, {
+      photo: {
+        buffer: photo.buffer,
+        mimetype: photo.mimetype,
+        originalname: photo.originalname || 'signed-invoice.jpg'
+      },
+      signature: signature
+        ? { buffer: signature.buffer, mimetype: signature.mimetype || 'image/png' }
+        : null,
+      recipientName,
+      notes
     })
     const updated = updateAssignment(id, {
       status: 'delivered',
-      deliveredAt: new Date().toISOString(),
+      deliveredAt: zohoProof.deliveredAt,
       proof: {
         recipientName,
-        fileName: file.originalname || 'signed-invoice.jpg',
-        mimeType: file.mimetype,
-        uploadedAt: new Date().toISOString(),
+        fileName: photo.originalname || 'signed-invoice.jpg',
+        mimeType: photo.mimetype,
+        uploadedAt: zohoProof.deliveredAt,
         notes,
-        zoho: uploaded
+        signatureDocumentId: zohoProof.signatureDocumentId,
+        zoho: {
+          photo: zohoProof.photoUpload,
+          signatureDocumentId: zohoProof.signatureDocumentId
+        }
       }
     })
     appendAdminAudit({

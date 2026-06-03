@@ -6,7 +6,7 @@ type Props = {
   onBack: () => void
   onAccept?: () => void | Promise<void>
   accepting?: boolean
-  onStartNavigation: () => void | Promise<void>
+  onViewMap: () => void
   onOpenProof: () => void
   onOpenAddress: () => void
   onMessage: () => void
@@ -19,7 +19,7 @@ export function DeliveryDetailScreen({
   onBack,
   onAccept,
   accepting,
-  onStartNavigation,
+  onViewMap,
   onOpenProof,
   onOpenAddress,
   onMessage,
@@ -136,19 +136,25 @@ export function DeliveryDetailScreen({
               {accepting ? 'Accepting…' : 'Accept delivery'}
             </button>
           ) : (
-            <button type="button" className="dd-accent-btn" onClick={() => void onStartNavigation()}>
-              <span className="material-symbols-outlined">navigation</span>
-              Start Navigation
+            <button type="button" className="dd-accent-btn" onClick={onViewMap}>
+              <span className="material-symbols-outlined">map</span>
+              View Map
             </button>
           )}
           <button
             type="button"
-            className="dd-text-btn"
-            style={{ width: '100%', marginTop: 10, color: needsAccept ? '#94a3b8' : 'var(--dd-muted)' }}
+            className="dd-accent-btn"
+            style={{
+              marginTop: 10,
+              background: needsAccept ? '#e2e8f0' : '#0f172a',
+              boxShadow: 'none',
+              opacity: needsAccept ? 0.7 : 1,
+            }}
             onClick={onOpenProof}
             disabled={needsAccept}
           >
-            Proof of delivery
+            <span className="material-symbols-outlined">check_circle</span>
+            Complete delivery
           </button>
         </div>
 

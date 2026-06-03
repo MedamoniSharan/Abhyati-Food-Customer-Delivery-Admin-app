@@ -11,9 +11,14 @@ function buildOrderItemsLabel(lineItems) {
 }
 
 function mapStatus(invoiceStatus, assignmentStatus) {
-  const status = String(assignmentStatus || invoiceStatus || '').toLowerCase()
-  if (status.includes('deliver')) return 'Delivered'
-  if (status.includes('transit') || status.includes('ship') || status.includes('sent')) return 'Shipped'
+  const assignment = String(assignmentStatus || '').toLowerCase()
+  if (assignment === 'delivered' || assignment.includes('deliver')) return 'Delivered'
+  if (assignment === 'in_transit' || assignment.includes('transit')) return 'Shipped'
+  if (assignment === 'accepted') return 'Shipped'
+
+  const invoice = String(invoiceStatus || '').toLowerCase()
+  if (invoice.includes('deliver')) return 'Delivered'
+  if (invoice.includes('transit') || invoice.includes('ship') || invoice.includes('sent')) return 'Shipped'
   return 'Processing'
 }
 
@@ -36,7 +41,10 @@ export function mapInvoiceToOrder(invoice, assignment) {
           fileName: proof.fileName || '',
           mimeType: proof.mimeType || '',
           uploadedAt: proof.uploadedAt || null,
-          recipientName: proof.recipientName || ''
+          recipientName: proof.recipientName || '',
+          hasSignature: Boolean(proof.signatureDocumentId),
+          notes: proof.notes || '',
+          storedInZoho: true
         }
       : null
   }

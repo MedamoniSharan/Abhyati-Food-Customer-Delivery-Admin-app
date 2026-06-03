@@ -101,6 +101,13 @@ export async function adminFetch<T>(path: string, init: RequestInit = {}): Promi
       const zm = z.message
       if (typeof zm === 'string' && zm.trim()) msg = zm.trim()
     }
+    const zohoHint = data.zoho_auth_hint
+    if (typeof zohoHint === 'string' && zohoHint.trim()) {
+      msg = `${msg}. ${zohoHint}`
+    } else if (res.status === 502 && msg.toLowerCase().includes('not authorized')) {
+      msg =
+        `${msg} Update ZOHO_REFRESH_TOKEN on the API server (Render .env or local my-app/backend/.env) with Books full-access scopes.`
+    }
     throw new Error(msg)
   }
   return data as T
