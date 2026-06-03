@@ -23,6 +23,11 @@ const envSchema = z.object({
   ZOHO_DEFAULT_PAYMENT_TERMS: z.string().default('Due on Receipt'),
   AUTH_DEFAULT_CUSTOMER_EMAIL: z.string().email().default('customer@abhyati.com'),
   AUTH_DEFAULT_CUSTOMER_PASSWORD: z.string().min(6).default('Abhyati@123'),
+  /** When true, seeds default customer on startup (off by default in production). */
+  AUTH_SEED_DEFAULT_CUSTOMER: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
 
   /** Admin dashboard + /api/admin/* (override in production) */
   ADMIN_EMAIL: z.string().email().default('admin@abhyati.com'),
@@ -67,7 +72,20 @@ const envSchema = z.object({
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
 
   /** Zoho Books bank account for recording Razorpay customer payments */
-  ZOHO_PAYMENT_ACCOUNT_ID: z.string().optional()
+  ZOHO_PAYMENT_ACCOUNT_ID: z.string().optional(),
+
+  /** MSG91 OTP (customer app login / signup). Template from MSG91 OTP widget / flow. */
+  MSG91_AUTH_KEY: z.string().optional(),
+  MSG91_TEMPLATE_ID: z.string().optional(),
+  MSG91_COUNTRY_CODE: z.string().default('91'),
+  MSG91_OTP_LENGTH: z.coerce.number().int().min(4).max(8).default(6),
+  MSG91_OTP_EXPIRY_MIN: z.coerce.number().int().min(1).max(30).default(10),
+  /** Dev only: allow OTP send/verify without MSG91 (verify with MSG91_DEV_OTP). */
+  MSG91_DEV_BYPASS: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
+  MSG91_DEV_OTP: z.string().default('123456')
 })
 
 const parsed = envSchema.safeParse(process.env)

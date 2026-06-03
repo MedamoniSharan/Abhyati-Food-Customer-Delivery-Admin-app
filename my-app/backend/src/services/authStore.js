@@ -1,5 +1,5 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
-import { createLogger, serializeError } from '../util/logger.js'
+import { createLogger, serializeAxiosError, serializeError } from '../util/logger.js'
 import { env } from '../config/env.js'
 import {
   buildNotesWithCustomerHash,
@@ -13,10 +13,13 @@ import {
   deleteModule,
   ensureCustomerContact,
   findCustomerByEmail,
+  findCustomerByMobile,
   getModuleById,
   listContactsDetailBySearchText,
   updateModule
 } from './zohoBooksService.js'
+import { phonesMatch } from '../util/phone.js'
+import { verifyOtpForMobile, isMsg91Configured, isMsg91DevBypass } from './msg91OtpService.js'
 
 const log = createLogger('auth')
 
@@ -101,6 +104,44 @@ export async function getCustomerContactForApp(email) {
   return c
 }
 
+/** Customer contact with app login, matched by mobile number in Zoho. */
+export async function getCustomerContactForAppByMobile(mobile) {
+  const listed = await findCustomerByMobile(mobile)
+  if (!listed?.contact_id) return null
+  const data = await getModuleById('/contacts', String(listed.contact_id))
+  const c = data?.contact || data
+  if (!c?.contact_id) return null
+  if (c.is_active === false || c.is_active === 'false') return null
+  if (parseDriverPasswordHashFromNotes(c.notes)) return null
+  if (parseCustomerPasswordHashFromNotes(c.notes) == null) return null
+  if (!phonesMatch(pickMobileFromContact(c), mobile)) return null
+  return c
+}
+
+export async function getCustomerUserByMobile(mobile) {
+  const contact = await getCustomerContactForAppByMobile(mobile)
+  return contact ? toPublicUserFromContact(contact) : null
+}
+
+export async function loginCustomerUserByMobile(mobile) {
+  const contact = await getCustomerContactForAppByMobile(mobile)
+  if (!contact) {
+    const error = new Error('No account found with this mobile number')
+    error.statusCode = 404
+    throw error
+  }
+  return toPublicUserFromContact(contact)
+}
+
+export function customerOtpRequired() {
+  return isMsg91Configured() || isMsg91DevBypass()
+}
+
+export async function assertCustomerOtpVerified(mobile, otp) {
+  if (!customerOtpRequired()) return
+  await verifyOtpForMobile(mobile, otp)
+}
+
 /**
  * Writes app-login password hash into Zoho contact `notes` (customer marker).
  */
@@ -150,8 +191,9 @@ export async function createCustomerUser({ email, password, contactId: explicitC
  * Self-service signup: ensures Zoho customer contact + app password in notes.
  * @returns {{ user: object, zohoContactCreated: boolean }}
  */
-export async function signupCustomerUser({ fullName, email, password, mobile, deliveryAddress }) {
+export async function signupCustomerUser({ fullName, email, password, mobile, deliveryAddress, otp }) {
   const normalizedEmail = normalizeEmail(email)
+  await assertCustomerOtpVerified(mobile, otp)
   const prior = await findCustomerByEmail(normalizedEmail)
   const zohoContactCreated = !prior?.contact_id
 
@@ -348,12 +390,29 @@ export async function updateCustomerUserByEmail(email, updates) {
 
 /**
  * Ensures default dev customer exists in Zoho with app password in notes (Zoho-only, no JSON).
+ * Skipped on production unless AUTH_SEED_DEFAULT_CUSTOMER=true.
  */
 export async function seedDefaultUser() {
+  const isProd = env.NODE_ENV === 'production'
+  if (isProd && !env.AUTH_SEED_DEFAULT_CUSTOMER) {
+    log.info('seedDefaultUser skipped (production). Set AUTH_SEED_DEFAULT_CUSTOMER=true to enable.')
+    return
+  }
+
   try {
     const email = normalizeEmail(env.AUTH_DEFAULT_CUSTOMER_EMAIL)
-    const existing = await findCustomerByEmail(email)
-    if (existing?.contact_id && parseCustomerPasswordHashFromNotes(existing.notes)) return
+    const listed = await findCustomerByEmail(email)
+    if (listed?.contact_id) {
+      const detail = await getModuleById('/contacts', listed.contact_id)
+      const c = detail?.contact || detail || listed
+      if (parseCustomerPasswordHashFromNotes(c?.notes)) {
+        log.info('seedDefaultUser: default customer already has app login', { email })
+        return
+      }
+      await attachCustomerCredentialOnZoho(listed.contact_id, env.AUTH_DEFAULT_CUSTOMER_PASSWORD)
+      log.info('seedDefaultUser: attached app login to existing Zoho customer', { email })
+      return
+    }
 
     const contact = await ensureCustomerContact({
       fullName: 'Default Customer',
@@ -364,10 +423,13 @@ export async function seedDefaultUser() {
       log.warn('seedDefaultUser: no Zoho contact id')
       return
     }
-    if (parseCustomerPasswordHashFromNotes(contact.notes)) return
+    const detail = await getModuleById('/contacts', contact.contact_id)
+    const c = detail?.contact || detail || contact
+    if (parseCustomerPasswordHashFromNotes(c?.notes)) return
     await attachCustomerCredentialOnZoho(contact.contact_id, env.AUTH_DEFAULT_CUSTOMER_PASSWORD)
     log.info('seedDefaultUser: ensured Zoho customer + app login', { email })
   } catch (err) {
-    log.error('seedDefaultUser failed', serializeError(err))
+    const payload = err?.response ? serializeAxiosError(err) : serializeError(err)
+    log.warn('seedDefaultUser failed (non-fatal)', payload)
   }
 }

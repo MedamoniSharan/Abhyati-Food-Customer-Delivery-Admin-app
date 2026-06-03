@@ -134,6 +134,7 @@ export type SignupPayload = {
   password: string
   mobile: string
   deliveryAddress?: string
+  otp?: string
 }
 
 export async function signupCustomer(payload: SignupPayload): Promise<LoginResponse> {
@@ -145,7 +146,73 @@ export async function signupCustomer(payload: SignupPayload): Promise<LoginRespo
   }
   const deliveryAddress = payload.deliveryAddress?.trim()
   if (deliveryAddress) body.deliveryAddress = deliveryAddress
+  const otp = payload.otp?.trim()
+  if (otp) body.otp = otp
   return authRequest('/api/auth/signup', body)
+}
+
+type OtpSendResponse = { message: string; devBypass?: boolean }
+
+async function authPostSimple(
+  path: string,
+  payload: Record<string, string>
+): Promise<OtpSendResponse> {
+  logApiCandidatesOnce(API_BASE_URL_CANDIDATES)
+  let lastError: unknown = null
+
+  for (const baseUrl of API_BASE_URL_CANDIDATES) {
+    try {
+      const url = `${baseUrl.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`
+      const response = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const text = await response.text()
+      const data = parseJsonBody(text) as OtpSendResponse & ParsedBody
+
+      if (!response.ok) {
+        const msg = formatAuthErrorMessage(data, response.status)
+        if (response.status >= 400 && response.status < 500) {
+          throw new AuthClientError(msg)
+        }
+        throw new Error(msg)
+      }
+
+      return { message: data.message || 'OK', devBypass: data.devBypass }
+    } catch (error) {
+      if (error instanceof AuthClientError) throw new Error(error.message)
+      lastError = error
+    }
+  }
+
+  const err = lastError instanceof Error ? lastError : new Error('Unable to reach auth API')
+  throw new Error(err.message)
+}
+
+export async function fetchOtpStatus(): Promise<{ otpEnabled: boolean }> {
+  logApiCandidatesOnce(API_BASE_URL_CANDIDATES)
+  for (const baseUrl of API_BASE_URL_CANDIDATES) {
+    try {
+      const url = `${baseUrl.replace(/\/$/, '')}/api/auth/otp/status`
+      const response = await fetchWithTimeout(url, { method: 'GET' })
+      const text = await response.text()
+      const data = parseJsonBody(text) as { otpEnabled?: boolean }
+      if (!response.ok) return { otpEnabled: false }
+      return { otpEnabled: Boolean(data.otpEnabled) }
+    } catch {
+      /* try next */
+    }
+  }
+  return { otpEnabled: false }
+}
+
+export async function sendCustomerOtp(mobile: string, purpose: 'login' | 'signup'): Promise<OtpSendResponse> {
+  return authPostSimple('/api/auth/otp/send', { mobile: mobile.trim(), purpose })
+}
+
+export async function loginCustomerWithOtp(mobile: string, otp: string): Promise<LoginResponse> {
+  return authRequest('/api/auth/otp/verify-login', { mobile: mobile.trim(), otp: otp.trim() })
 }
 
 export async function fetchAuthMe(token: string): Promise<AuthUser | null> {

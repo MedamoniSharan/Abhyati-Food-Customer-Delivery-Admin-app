@@ -2,12 +2,16 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { requireActiveCustomer, requireCustomer } from '../middleware/requireCustomer.js'
 import {
+  customerOtpRequired,
   getCustomerContactForApp,
   getCustomerUserByEmail,
+  getCustomerUserByMobile,
   loginCustomerUser,
+  loginCustomerUserByMobile,
   signupCustomerUser,
   updateCustomerUserByEmail
 } from '../services/authStore.js'
+import { sendOtpToMobile, verifyOtpForMobile } from '../services/msg91OtpService.js'
 import { signCustomerToken, verifyCustomerToken } from '../services/jwtService.js'
 import { getActiveTierForContact, isCustomerPricingConfigured } from '../services/customerPricingZohoService.js'
 
@@ -16,17 +20,36 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Password is required')
 })
 
-const signupSchema = z.object({
-  fullName: z.string().trim().min(2, 'Full name is required'),
-  email: z.string().email('Valid email is required'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
-  mobile: z
-    .string()
-    .trim()
-    .min(8, 'Mobile number is required')
-    .max(50, 'Mobile number is too long')
-    .refine((v) => /\d/.test(v), { message: 'Enter a valid mobile number' }),
-  deliveryAddress: z.string().max(2000).optional()
+const mobileField = z
+  .string()
+  .trim()
+  .min(8, 'Mobile number is required')
+  .max(50, 'Mobile number is too long')
+  .refine((v) => /\d/.test(v), { message: 'Enter a valid mobile number' })
+
+const signupSchema = z
+  .object({
+    fullName: z.string().trim().min(2, 'Full name is required'),
+    email: z.string().email('Valid email is required'),
+    password: z.string().min(6, 'Password must be at least 6 characters'),
+    mobile: mobileField,
+    deliveryAddress: z.string().max(2000).optional(),
+    otp: z.string().trim().optional()
+  })
+  .superRefine((data, ctx) => {
+    if (customerOtpRequired() && (!data.otp || data.otp.length < 4)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OTP is required', path: ['otp'] })
+    }
+  })
+
+const otpSendSchema = z.object({
+  mobile: mobileField,
+  purpose: z.enum(['login', 'signup'])
+})
+
+const otpVerifyLoginSchema = z.object({
+  mobile: mobileField,
+  otp: z.string().trim().min(4, 'OTP is required').max(8)
 })
 
 const profilePatchSchema = z.object({
@@ -45,6 +68,49 @@ function normEmail(e) {
 }
 
 export const authRoutes = Router()
+
+authRoutes.get('/otp/status', (_req, res) => {
+  res.json({ otpEnabled: customerOtpRequired() })
+})
+
+authRoutes.post('/otp/send', async (req, res, next) => {
+  try {
+    const input = otpSendSchema.parse(req.body)
+    if (input.purpose === 'login') {
+      const user = await getCustomerUserByMobile(input.mobile)
+      if (!user) {
+        return res.status(404).json({
+          message: 'No account found with this mobile. Create an account first.'
+        })
+      }
+    }
+    const result = await sendOtpToMobile(input.mobile)
+    res.json({
+      message: result.devBypass
+        ? 'Dev mode: use the test OTP from server config (MSG91_DEV_OTP)'
+        : 'OTP sent to your mobile number',
+      devBypass: Boolean(result.devBypass)
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+authRoutes.post('/otp/verify-login', async (req, res, next) => {
+  try {
+    const input = otpVerifyLoginSchema.parse(req.body)
+    await verifyOtpForMobile(input.mobile, input.otp)
+    const user = await loginCustomerUserByMobile(input.mobile)
+    const token = signCustomerToken(user.email)
+    res.json({
+      message: 'Login successful',
+      user,
+      token
+    })
+  } catch (error) {
+    next(error)
+  }
+})
 
 authRoutes.post('/signup', async (req, res, next) => {
   try {
