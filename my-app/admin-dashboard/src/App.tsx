@@ -389,6 +389,12 @@ export default function App() {
   const [invoicesRaw, setInvoicesRaw] = useState<ZohoInvoiceRow[]>([])
   const [invoicesSortAsc, setInvoicesSortAsc] = useState(false)
   const [invoicesPage, setInvoicesPage] = useState(1)
+  const [invoicesLoading, setInvoicesLoading] = useState(false)
+  const [invoicesMeta, setInvoicesMeta] = useState<{ total: number; has_more: boolean; page: number }>({
+    total: 0,
+    has_more: false,
+    page: 1
+  })
   const [invoiceAssignDriverEmail, setInvoiceAssignDriverEmail] = useState('')
   const [assigningInvoiceId, setAssigningInvoiceId] = useState<string | null>(null)
   const [assignmentsRaw, setAssignmentsRaw] = useState<DeliveryAssignmentRow[]>([])
@@ -473,10 +479,36 @@ export default function App() {
     }
   }, [])
 
-  const refreshInvoices = useCallback(async () => {
-    const data = await adminFetch<{ invoices?: ZohoInvoiceRow[] }>('/api/admin/invoices')
-    setInvoicesRaw(Array.isArray(data.invoices) ? data.invoices : [])
-  }, [])
+  const refreshInvoices = useCallback(
+    async (opts?: { page?: number; sortAsc?: boolean }) => {
+      setInvoicesLoading(true)
+      try {
+        const p = opts?.page ?? invoicesPage
+        const sortAsc = opts?.sortAsc ?? invoicesSortAsc
+        const params = new URLSearchParams()
+        params.set('page', String(p))
+        params.set('per_page', String(TABLE_PAGE_SIZE))
+        params.set('sort', sortAsc ? 'asc' : 'desc')
+        const data = await adminFetch<{
+          invoices?: ZohoInvoiceRow[]
+          total?: number
+          has_more_page?: boolean
+          page?: number
+        }>(`/api/admin/invoices?${params.toString()}`)
+        setInvoicesRaw(Array.isArray(data.invoices) ? data.invoices : [])
+        setInvoicesMeta({
+          total: typeof data.total === 'number' ? data.total : (data.invoices || []).length,
+          has_more: Boolean(data.has_more_page),
+          page: typeof data.page === 'number' ? data.page : p
+        })
+        if (opts?.page !== undefined) setInvoicesPage(opts.page)
+        if (opts?.sortAsc !== undefined) setInvoicesSortAsc(opts.sortAsc)
+      } finally {
+        setInvoicesLoading(false)
+      }
+    },
+    [invoicesPage, invoicesSortAsc]
+  )
 
   const refreshAssignments = useCallback(async () => {
     setAssignmentsRefreshing(true)
@@ -507,7 +539,7 @@ export default function App() {
     try {
       if (page === 'drivers') await refreshDrivers()
       if (page === 'deliveries') {
-        await Promise.all([refreshDeliveries(), refreshZohoContacts(), refreshDrivers(), refreshInvoices()])
+        await Promise.all([refreshDeliveries(), refreshZohoContacts(), refreshDrivers(), refreshAssignments()])
       }
       if (page === 'assignments') {
         await refreshAssignments()
@@ -555,6 +587,18 @@ export default function App() {
       }
     })
   }, [token, page, customersPage, customerSearch, customerCategoryFilter, customerListSort, refreshCustomers])
+
+  useEffect(() => {
+    if (!token || page !== 'deliveries') return
+    setLoadErr('')
+    void refreshInvoices().catch((e) => {
+      setLoadErr(e instanceof Error ? e.message : 'Failed to load invoices')
+      if (String(e).includes('401') || String(e).includes('Invalid')) {
+        setAdminToken(null)
+        setTokenState(null)
+      }
+    })
+  }, [token, page, invoicesPage, invoicesSortAsc, refreshInvoices])
 
   useEffect(() => {
     const onSessionLost = () => {
@@ -870,20 +914,6 @@ export default function App() {
     () => paginateRows(sortedSalesOrders, salesOrdersPage, TABLE_PAGE_SIZE),
     [sortedSalesOrders, salesOrdersPage]
   )
-  const sortedInvoices = useMemo(
-    () =>
-      [...invoicesRaw].sort((a, b) => {
-        const ad = String(a.date ?? a.invoice_date ?? '')
-        const bd = String(b.date ?? b.invoice_date ?? '')
-        const da = ad.localeCompare(bd)
-        return invoicesSortAsc ? da : -da
-      }),
-    [invoicesRaw, invoicesSortAsc]
-  )
-  const invoicesPaged = useMemo(
-    () => paginateRows(sortedInvoices, invoicesPage, TABLE_PAGE_SIZE),
-    [sortedInvoices, invoicesPage]
-  )
 
   const sortedAssignments = useMemo(
     () =>
@@ -898,6 +928,15 @@ export default function App() {
     () => paginateRows(sortedAssignments, assignmentsPage, TABLE_PAGE_SIZE),
     [sortedAssignments, assignmentsPage]
   )
+  const assignmentsByInvoiceId = useMemo(() => {
+    const map = new Map<string, DeliveryAssignmentRow>()
+    for (const row of assignmentsRaw) {
+      const invoiceId = String(row.invoiceId || '').trim()
+      if (!invoiceId) continue
+      map.set(invoiceId, row)
+    }
+    return map
+  }, [assignmentsRaw])
   /** ProductsSection lives inside this branch; gating on its fetch would unmount it during load,
    * abort requests, and remount in a loop (many canceled /api/admin/items calls). */
   const isCurrentPageLoading = pageDataLoading
@@ -1890,16 +1929,30 @@ export default function App() {
                       ))}
                   </select>
                 </label>
-                <button type="button" className="admin-btn admin-btn--ghost" onClick={() => void refreshInvoices()}>
+                <button
+                  type="button"
+                  className="admin-btn admin-btn--ghost"
+                  disabled={invoicesLoading}
+                  onClick={() => void Promise.all([refreshInvoices(), refreshAssignments()])}
+                >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
                   Refresh invoices
                 </button>
               </div>
-              <div className="admin-table-wrap">
+              <div className="admin-table-wrap admin-busy-host">
+                {invoicesLoading ? <AdminBusyOverlay label="Loading invoices…" /> : null}
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th className="admin-th-sortable" onClick={() => setInvoicesSortAsc((v) => !v)} title="Sort by date">
+                      <th
+                        className="admin-th-sortable"
+                        onClick={() => {
+                          const next = !invoicesSortAsc
+                          setInvoicesSortAsc(next)
+                          setInvoicesPage(1)
+                        }}
+                        title="Sort by date"
+                      >
                         Date {invoicesSortAsc ? '▲' : '▼'}
                       </th>
                       <th>Invoice #</th>
@@ -1911,19 +1964,27 @@ export default function App() {
                       <th>Paid at</th>
                       <th>Due</th>
                       <th>Amount</th>
-                      <th>Assign</th>
+                      <th>Driver</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {invoicesPaged.pageRows.length === 0 ? (
+                    {invoicesLoading && invoicesRaw.length === 0 ? (
                       <tr>
                         <td colSpan={11} style={{ color: 'var(--admin-muted)', padding: '16px 12px' }}>
-                          No invoices loaded. Use Refresh or check Zoho Books connection.
+                          Loading invoices from Zoho…
                         </td>
                       </tr>
                     ) : null}
-                    {invoicesPaged.pageRows.map((inv) => {
+                    {!invoicesLoading && invoicesRaw.length === 0 ? (
+                      <tr>
+                        <td colSpan={11} style={{ color: 'var(--admin-muted)', padding: '16px 12px' }}>
+                          No invoices on this page. Use Refresh or check Zoho Books connection.
+                        </td>
+                      </tr>
+                    ) : null}
+                    {invoicesRaw.map((inv) => {
                       const id = String(inv.invoice_id ?? '')
+                      const assignment = id ? assignmentsByInvoiceId.get(id) : undefined
                       return (
                         <tr key={id || inv.invoice_number}>
                           <td>{inv.date ?? inv.invoice_date ?? '—'}</td>
@@ -1937,34 +1998,57 @@ export default function App() {
                           <td>{inv.due_date ?? '—'}</td>
                           <td>{formatMoneyInr(Number(inv.total))}</td>
                           <td>
-                            <button
-                              type="button"
-                              className="admin-btn admin-btn-inline"
-                              disabled={!id || assigningInvoiceId === id}
-                              onClick={async () => {
-                                if (!invoiceAssignDriverEmail) {
-                                  toast('Choose a driver first', 'info')
-                                  return
-                                }
-                                if (!id) return
-                                setAssigningInvoiceId(id)
-                                try {
-                                  await adminFetch('/api/admin/delivery-assignments', {
-                                    method: 'POST',
-                                    body: JSON.stringify({ driver_email: invoiceAssignDriverEmail, invoice_id: id })
-                                  })
-                                  toast('Invoice assigned to driver')
-                                  void refreshAssignments()
-                                } catch (e) {
-                                  toast(e instanceof Error ? e.message : 'Assign failed', 'error')
-                                } finally {
-                                  setAssigningInvoiceId(null)
-                                }
-                              }}
-                            >
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="3.5"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-                              {assigningInvoiceId === id ? 'Assigning...' : 'Assign'}
-                            </button>
+                            {assignment ? (
+                              <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>
+                                {assignment.driverName || assignment.driverEmail || 'Assigned'}
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="admin-btn admin-btn-inline"
+                                disabled={!id || assigningInvoiceId === id}
+                                onClick={async () => {
+                                  if (!invoiceAssignDriverEmail) {
+                                    toast('Choose a driver first', 'info')
+                                    return
+                                  }
+                                  if (!id) return
+                                  setAssigningInvoiceId(id)
+                                  try {
+                                    const result = await adminFetch<{
+                                      assignment?: DeliveryAssignmentRow
+                                      message?: string
+                                    }>('/api/admin/delivery-assignments', {
+                                      method: 'POST',
+                                      body: JSON.stringify({
+                                        driver_email: invoiceAssignDriverEmail,
+                                        invoice_id: id
+                                      })
+                                    })
+                                    if (result.assignment) {
+                                      setAssignmentsRaw((prev) => {
+                                        const without = prev.filter((row) => String(row.invoiceId) !== id)
+                                        return [...without, result.assignment!]
+                                      })
+                                    } else {
+                                      await refreshAssignments()
+                                    }
+                                    const driverLabel =
+                                      result.assignment?.driverName ||
+                                      result.assignment?.driverEmail ||
+                                      invoiceAssignDriverEmail
+                                    toast(`Assigned to ${driverLabel}`)
+                                  } catch (e) {
+                                    toast(e instanceof Error ? e.message : 'Assign failed', 'error')
+                                  } finally {
+                                    setAssigningInvoiceId(null)
+                                  }
+                                }}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="3.5"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                                {assigningInvoiceId === id ? 'Assigning...' : 'Assign'}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       )
@@ -1972,21 +2056,34 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-              <div className="admin-table-pagination">
-                <button className="admin-btn admin-btn--ghost" type="button" onClick={() => setInvoicesPage((p) => Math.max(1, p - 1))}>
-                  Prev
+              <nav className="admin-pagination" aria-label="Invoice pages">
+                <button
+                  className="admin-btn admin-btn--ghost"
+                  type="button"
+                  disabled={invoicesLoading || invoicesPage <= 1}
+                  onClick={() => setInvoicesPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
                 </button>
-                <span>
-                  Page {invoicesPaged.safePage} / {invoicesPaged.totalPages} ({invoicesRaw.length} invoices)
+                <span className="admin-pagination__info">
+                  Page <strong>{invoicesPage}</strong>
+                  {invoicesMeta.total > 0 ? (
+                    <>
+                      {' '}
+                      · ~{Math.max(1, Math.ceil(invoicesMeta.total / TABLE_PAGE_SIZE))} pages (Zoho total)
+                    </>
+                  ) : null}
+                  {invoicesLoading ? <span className="admin-muted"> · loading…</span> : null}
                 </span>
                 <button
                   className="admin-btn admin-btn--ghost"
                   type="button"
-                  onClick={() => setInvoicesPage((p) => Math.min(invoicesPaged.totalPages, p + 1))}
+                  disabled={invoicesLoading || !invoicesMeta.has_more}
+                  onClick={() => setInvoicesPage((p) => p + 1)}
                 >
                   Next
                 </button>
-              </div>
+              </nav>
 
               <h3 style={{ marginBottom: 8 }}>Create sales order</h3>
               <div className="admin-form-row" style={{ flexDirection: 'column', alignItems: 'stretch', maxWidth: 640 }}>

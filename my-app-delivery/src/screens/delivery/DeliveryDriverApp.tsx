@@ -39,6 +39,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
   const scannerVideoRef = useRef<HTMLVideoElement>(null)
   const scannerStreamRef = useRef<MediaStream | null>(null)
+  const prevTabRef = useRef<DriverTab>(tab)
 
   const activeStops = useMemo(() => stops.filter((s) => s.statusTag !== 'Delivered'), [stops])
   const completedCount = useMemo(() => stops.filter((s) => s.statusTag === 'Delivered').length, [stops])
@@ -201,6 +202,28 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
       mounted = false
     }
   }, [onNotify])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void getDeliveryStops()
+        .then((data) => setStops(data))
+        .catch(() => {
+          /* keep current list on background refresh failure */
+        })
+    }, 20000)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    if (prevTabRef.current === tab) return
+    prevTabRef.current = tab
+    if (tab !== 'dashboard' && tab !== 'deliveries') return
+    void getDeliveryStops()
+      .then((data) => setStops(data))
+      .catch(() => {
+        /* keep current list on tab refresh failure */
+      })
+  }, [tab])
 
   useEffect(() => {
     if (!detailStopId) {
@@ -399,6 +422,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
             }}
             onViewMap={(hint) => openRouteMap(hint)}
             onNotify={onNotify}
+            onRefresh={() => refreshStops()}
           />
         ) : null}
         {tab === 'history' ? (

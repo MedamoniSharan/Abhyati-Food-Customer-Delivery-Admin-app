@@ -25,6 +25,7 @@ type Props = {
   /** Optional maps destination; falls back in parent when empty */
   onViewMap: (mapsQueryHint?: string) => void
   onNotify: (message: string) => void
+  onRefresh?: () => void | Promise<void>
 }
 
 function normalizeCalendarDate(d: Date): Date {
@@ -42,6 +43,7 @@ export function AssignedDeliveriesScreen({
   onBackToDashboard,
   onViewMap,
   onNotify,
+  onRefresh,
 }: Props) {
   const [selectedDate, setSelectedDate] = useState(() => normalizeCalendarDate(new Date()))
 
@@ -114,8 +116,14 @@ export function AssignedDeliveriesScreen({
             <span className="material-symbols-outlined">arrow_back</span>
           </button>
           <h1>{screenTitle}</h1>
-          <button type="button" className="dd-icon-btn" aria-label="Search" onClick={() => onNotify('Search coming soon')}>
-            <span className="material-symbols-outlined">search</span>
+          <button
+            type="button"
+            className="dd-icon-btn"
+            aria-label="Refresh deliveries"
+            disabled={loading}
+            onClick={() => void onRefresh?.()}
+          >
+            <span className="material-symbols-outlined">refresh</span>
           </button>
         </div>
         {statusFilter === 'all' ? (

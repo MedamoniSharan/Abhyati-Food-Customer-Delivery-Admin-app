@@ -53,6 +53,39 @@ export function listAssignmentsForDriver(driverEmail) {
   return [...assignments.values()].filter((a) => String(a.driverEmail).toLowerCase() === key)
 }
 
+export function upsertAssignmentRow(row) {
+  reloadAssignmentsFromDisk()
+  const id = String(row?.id || '').trim()
+  const invoiceId = String(row?.invoiceId || '').trim()
+  const driverEmail = String(row?.driverEmail || '').trim().toLowerCase()
+  if (!id || !invoiceId || !driverEmail) return null
+  const existingById = assignments.get(id)
+  if (existingById) return existingById
+  const existingByInvoice = [...assignments.values()].find((a) => String(a.invoiceId) === invoiceId)
+  if (existingByInvoice) return existingByInvoice
+  const next = {
+    ...row,
+    id,
+    driverEmail,
+    invoiceId,
+    driverName: String(row.driverName || 'Driver'),
+    invoiceNumber: String(row.invoiceNumber || invoiceId),
+    customerName: String(row.customerName || 'Customer'),
+    customerEmail: String(row.customerEmail || '').trim().toLowerCase(),
+    amount: Number(row.amount) || 0,
+    address: String(row.address || ''),
+    status: String(row.status || 'assigned'),
+    acceptedAt: row.acceptedAt ?? null,
+    deliveredAt: row.deliveredAt ?? null,
+    proof: row.proof ?? null,
+    createdAt: String(row.createdAt || new Date().toISOString()),
+    updatedAt: String(row.updatedAt || row.createdAt || new Date().toISOString())
+  }
+  assignments.set(id, next)
+  persist()
+  return next
+}
+
 export function createAssignment({
   driverEmail,
   driverName,

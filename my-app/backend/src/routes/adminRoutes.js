@@ -60,6 +60,7 @@ import {
   withItemProductCategoryVirtual
 } from '../services/productCategoryZohoService.js'
 import { createAssignment, getAssignmentById, listAssignments } from '../services/deliveryAssignmentStore.js'
+import { upsertInvoiceAssignmentNote } from '../services/zohoDeliveryAssignmentNotes.js'
 import { paymentsByInvoiceIdMap } from '../services/paymentRecordStore.js'
 import {
   addPricingTier,
@@ -494,6 +495,12 @@ const customersListQuery = z.object({
   sort: z.enum(['asc', 'desc', 'newest']).default('asc')
 })
 
+const invoicesListQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  per_page: z.coerce.number().int().min(1).max(50).default(8),
+  sort: z.enum(['asc', 'desc']).default('desc')
+})
+
 adminRoutes.get('/customers', async (req, res, next) => {
   try {
     const q = customersListQuery.parse(req.query)
@@ -894,8 +901,13 @@ adminRoutes.get('/drivers', async (_req, res, next) => {
 
 adminRoutes.get('/invoices', async (req, res, next) => {
   try {
-    const query = z.object({}).passthrough().parse(req.query)
-    const data = await listModule('/invoices', { per_page: 200, ...query })
+    const q = invoicesListQuery.parse(req.query)
+    const data = await listModule('/invoices', {
+      page: q.page,
+      per_page: q.per_page,
+      sort_column: 'date',
+      sort_order: q.sort === 'asc' ? 'A' : 'D'
+    })
     const paymentMap = paymentsByInvoiceIdMap()
     const rows = Array.isArray(data?.invoices) ? data.invoices : []
     const invoices = rows.map((inv) => {
@@ -912,7 +924,15 @@ adminRoutes.get('/invoices', async (req, res, next) => {
         }
       }
     })
-    res.json({ ...data, invoices })
+    const ctx = data?.page_context || {}
+    res.json({
+      ...data,
+      invoices,
+      page: q.page,
+      per_page: q.per_page,
+      total: Number(ctx.total) || invoices.length,
+      has_more_page: Boolean(ctx.has_more_page)
+    })
   } catch (error) {
     next(error)
   }
@@ -1031,6 +1051,11 @@ adminRoutes.post('/delivery-assignments', async (req, res, next) => {
       amount: Number(invoice.total) || 0,
       address: String(invoice.billing_address?.address || invoice.shipping_address?.address || '')
     })
+    try {
+      await upsertInvoiceAssignmentNote(assignment.invoiceId, assignment)
+    } catch {
+      /* assignment still valid in app store; Zoho note is best-effort sync */
+    }
     appendAdminAudit({ action: 'admin_assign_invoice', meta: { driver: driver.email, invoice: input.invoice_id } })
     res.status(201).json({ message: 'Invoice assigned to driver', assignment })
   } catch (error) {

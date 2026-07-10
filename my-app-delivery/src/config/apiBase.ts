@@ -17,7 +17,7 @@ export function logApiCandidatesOnce(bases: string[]): void {
   console.log('[API] API URL:', primary)
 }
 
-/** Single backend origin — Render production API. */
+/** Single backend origin — always the direct API (Render), unless overridden in env. */
 export function getApiBaseCandidates(): string[] {
   const fromEnv = trimBase(import.meta.env.VITE_API_BASE_URL || '')
   const base = fromEnv || PUBLIC_API_BASE_URL

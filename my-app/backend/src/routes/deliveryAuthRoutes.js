@@ -10,9 +10,10 @@ import {
 } from '../services/driverStore.js'
 import {
   getAssignmentById,
-  listAssignmentsForDriver,
   updateAssignment
 } from '../services/deliveryAssignmentStore.js'
+import { resolveAssignmentsForDriver } from '../services/deliveryAssignmentResolve.js'
+import { upsertInvoiceAssignmentNote } from '../services/zohoDeliveryAssignmentNotes.js'
 import { signDriverToken } from '../services/jwtService.js'
 import { uploadFullDeliveryProofToZoho } from '../services/zohoDeliveryProofService.js'
 
@@ -67,7 +68,18 @@ deliveryAuthRoutes.post('/login', async (req, res, next) => {
   }
 })
 
-deliveryAuthRoutes.use(requireDriver, requireActiveDriver)
+deliveryAuthRoutes.use(requireDriver)
+
+deliveryAuthRoutes.get('/assignments', async (req, res, next) => {
+  try {
+    const assignments = await resolveAssignmentsForDriver(req.driver.email)
+    res.json({ assignments })
+  } catch (error) {
+    next(error)
+  }
+})
+
+deliveryAuthRoutes.use(requireActiveDriver)
 
 deliveryAuthRoutes.get('/me', async (req, res, next) => {
   try {
@@ -120,12 +132,7 @@ deliveryAuthRoutes.patch('/profile', async (req, res, next) => {
   }
 })
 
-deliveryAuthRoutes.get('/assignments', (req, res) => {
-  const assignments = listAssignmentsForDriver(req.driver.email)
-  res.json({ assignments })
-})
-
-deliveryAuthRoutes.post('/assignments/:id/accept', (req, res, next) => {
+deliveryAuthRoutes.post('/assignments/:id/accept', async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
     const row = getAssignmentById(id)
@@ -148,13 +155,18 @@ deliveryAuthRoutes.post('/assignments/:id/accept', (req, res, next) => {
       status: 'accepted',
       acceptedAt: new Date().toISOString()
     })
+    try {
+      await upsertInvoiceAssignmentNote(updated.invoiceId, updated)
+    } catch {
+      /* keep local assignment even if Zoho sync fails */
+    }
     res.json({ message: 'Assignment accepted', assignment: updated })
   } catch (error) {
     next(error)
   }
 })
 
-deliveryAuthRoutes.patch('/assignments/:id/status', (req, res, next) => {
+deliveryAuthRoutes.patch('/assignments/:id/status', async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
     const row = getAssignmentById(id)
@@ -180,6 +192,11 @@ deliveryAuthRoutes.patch('/assignments/:id/status', (req, res, next) => {
       status: nextStatus,
       ...(nextStatus === 'delivered' ? { deliveredAt: new Date().toISOString() } : {})
     })
+    try {
+      await upsertInvoiceAssignmentNote(updated.invoiceId, updated)
+    } catch {
+      /* keep local assignment even if Zoho sync fails */
+    }
     res.json({ message: 'Status updated', assignment: updated })
   } catch (error) {
     next(error)
@@ -243,6 +260,11 @@ deliveryAuthRoutes.post('/assignments/:id/proof', proofUpload, async (req, res, 
         }
       }
     })
+    try {
+      await upsertInvoiceAssignmentNote(updated.invoiceId, updated)
+    } catch {
+      /* keep local assignment even if Zoho sync fails */
+    }
     appendAdminAudit({
       action: 'driver_uploaded_invoice_proof',
       meta: { assignmentId: id, invoiceId: row.invoiceId, driverEmail: req.driver.email }

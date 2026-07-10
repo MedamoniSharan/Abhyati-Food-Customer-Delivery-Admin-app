@@ -302,6 +302,10 @@ body[data-toast-layout='main'] .app-toast-host {
   color: #facc15;
 }
 
+.auth-shell.auth-form-shell {
+  overflow: visible;
+}
+
 .auth-form-shell {
   align-items: center;
 }
@@ -310,15 +314,18 @@ body[data-toast-layout='main'] .app-toast-host {
   width: min(100%, 420px);
   border-radius: 22px;
   background: #fff;
-  padding: 16px;
+  padding: 20px 16px 16px;
   box-shadow: 0 16px 28px rgba(0, 0, 0, 0.24);
 }
 
 .auth-logo-top {
   width: 72px;
   height: 72px;
-  margin: -52px auto 8px;
+  margin: 0 auto 12px;
   display: block;
+  object-fit: contain;
+  border-radius: 18px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
 }
 
 .auth-form-card h2 {
