@@ -80,9 +80,8 @@ export async function adminFetch<T>(path: string, init: RequestInit = {}): Promi
   }
   const parsed = parseJsonSafe(text)
   if (!parsed.ok) {
-    throw new Error(
-      res.ok ? 'Invalid JSON from server' : `Request failed (${res.status}). ${parsed.raw.slice(0, 160)}`
-    )
+    const snippet = parsed.raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160)
+    throw new Error(res.ok ? 'Invalid JSON from server' : `Request failed (${res.status})${snippet ? `. ${snippet}` : ''}`)
   }
   const data = parsed.data as Record<string, unknown>
   if (!res.ok) {

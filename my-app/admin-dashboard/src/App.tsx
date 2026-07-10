@@ -6,7 +6,7 @@ import { IconDeleteButton, IconEditButton } from './components/AdminIconButtons'
 import { PasswordWithVisibility } from './components/PasswordWithVisibility'
 import { ProductsSection } from './components/ProductsSection'
 import { ProductCategoriesSection } from './components/ProductCategoriesSection'
-import { AssignmentTrackingSection, type DeliveryAssignmentRow } from './components/AssignmentTrackingSection'
+import { AssignmentTrackingSection, assignmentActivityMs, type DeliveryAssignmentRow } from './components/AssignmentTrackingSection'
 import { useToast } from './components/Toast'
 
 type Page =
@@ -375,6 +375,7 @@ export default function App() {
   const [customerCategoryFilter, setCustomerCategoryFilter] = useState('')
   const [pricingTiers, setPricingTiers] = useState<PricingTierRow[]>([])
   const [pricingConfigured, setPricingConfigured] = useState(false)
+  const [pricingTiersLoadError, setPricingTiersLoadError] = useState('')
   const [pricingTiersLoading, setPricingTiersLoading] = useState(false)
   const [newTier, setNewTier] = useState({ id: '', name: '', discountPercent: '', discountAmountInr: '' })
   const [editingTier, setEditingTier] = useState<PricingTierRow | null>(null)
@@ -406,15 +407,18 @@ export default function App() {
 
   const refreshPricingTiers = useCallback(async () => {
     setPricingTiersLoading(true)
+    setPricingTiersLoadError('')
     try {
-      const r = await adminFetch<{ configured?: boolean; tiers?: PricingTierRow[] }>(
+      const r = await adminFetch<{ configured?: boolean; tiers?: PricingTierRow[]; loadError?: string }>(
         '/api/admin/customer-pricing-categories'
       )
       setPricingConfigured(Boolean(r.configured))
       setPricingTiers(Array.isArray(r.tiers) ? r.tiers : [])
-    } catch {
+      setPricingTiersLoadError(typeof r.loadError === 'string' ? r.loadError : '')
+    } catch (e) {
       setPricingConfigured(false)
       setPricingTiers([])
+      setPricingTiersLoadError(e instanceof Error ? e.message : 'Failed to load pricing tiers')
     } finally {
       setPricingTiersLoading(false)
     }
@@ -633,7 +637,12 @@ export default function App() {
       }
     } catch (e) {
       setZohoStatus('error')
-      setZohoStatusDetail(e instanceof Error ? e.message : 'Zoho Books check failed')
+      const msg = e instanceof Error ? e.message : 'Zoho Books check failed'
+      if (/404/.test(msg) || /Cannot GET/i.test(msg)) {
+        setZohoStatusDetail('Zoho status unavailable — restart the backend (npm run dev in my-app/backend)')
+      } else {
+        setZohoStatusDetail(msg.slice(0, 240))
+      }
     }
   }, [token])
 
@@ -951,8 +960,8 @@ export default function App() {
   const sortedAssignments = useMemo(
     () =>
       [...assignmentsRaw].sort((a, b) => {
-        const da = new Date(a.deliveredAt || a.proof?.uploadedAt || '').getTime()
-        const db = new Date(b.deliveredAt || b.proof?.uploadedAt || '').getTime()
+        const da = assignmentActivityMs(a)
+        const db = assignmentActivityMs(b)
         return assignmentsSortAsc ? da - db : db - da
       }),
     [assignmentsRaw, assignmentsSortAsc]
@@ -1556,6 +1565,18 @@ export default function App() {
                     <code>ZOHO_CUSTOM_FIELD_CUSTOMER_TIER_ID</code> in the backend <code>.env</code> to enable tier storage
                     in Zoho. See <code>.env.example</code> for setup notes.
                   </p>
+                ) : pricingTiersLoadError ? (
+                  <div className="admin-error" style={{ marginBottom: 0 }}>
+                    <p style={{ margin: '0 0 8px' }}>
+                      Pricing tiers are configured, but Zoho returned invalid tier data (often wrong JSON in the catalog
+                      contact custom field).
+                    </p>
+                    <p style={{ margin: 0, fontSize: '0.9rem' }}>{pricingTiersLoadError}</p>
+                    <p className="admin-muted" style={{ margin: '12px 0 0', fontSize: '0.85rem' }}>
+                      Fix the JSON in Zoho or run <code>npm run zoho:setup-pricing-fields</code> from{' '}
+                      <code>my-app/backend</code>, then refresh this page.
+                    </p>
+                  </div>
                 ) : (
                   <>
                     {pricingTiersLoading && pricingTiers.length > 0 ? (

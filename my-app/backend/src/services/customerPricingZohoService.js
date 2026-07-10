@@ -3,6 +3,7 @@ import { findCustomerByEmail, getModuleById, updateModule } from './zohoBooksSer
 import {
   applyCustomerPrice,
   parseTiersJson,
+  pricingTiersArraySchema,
   serializeTiersForZoho,
   validateSingleTier
 } from './customerPricingMath.js'
@@ -114,7 +115,7 @@ export async function savePricingTiers(tiers) {
   const custom_fields = mergeCustomFieldArray(c, fid, body)
   await updateModule('/contacts', cid, { contact_id: cid, custom_fields })
   invalidatePricingTierCache()
-  return listPricingTiers()
+  return pricingTiersArraySchema.parse(tiers)
 }
 
 export async function getContactById(contactId) {

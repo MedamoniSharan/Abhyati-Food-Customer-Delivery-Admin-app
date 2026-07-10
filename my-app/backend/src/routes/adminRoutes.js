@@ -68,12 +68,14 @@ import {
   notifyDriverAssignment
 } from '../services/notificationService.js'
 import { upsertInvoiceAssignmentNote } from '../services/zohoDeliveryAssignmentNotes.js'
+import { pricingTiersArraySchema } from '../services/customerPricingMath.js'
 import { paymentsByInvoiceIdMap } from '../services/paymentRecordStore.js'
 import {
   addPricingTier,
   deletePricingTier,
   isCustomerPricingConfigured,
   listPricingTiers,
+  savePricingTiers,
   resolvePricingTierDisplay,
   setCustomerPricingTier,
   updatePricingTier
@@ -635,10 +637,33 @@ const pricingTierPatchBody = z
 
 adminRoutes.get('/customer-pricing-categories', async (_req, res, next) => {
   try {
-    res.json({
-      configured: isCustomerPricingConfigured(),
-      tiers: isCustomerPricingConfigured() ? await listPricingTiers() : []
-    })
+    const configured = isCustomerPricingConfigured()
+    if (!configured) {
+      res.json({ configured: false, tiers: [] })
+      return
+    }
+    try {
+      const tiers = await listPricingTiers()
+      res.json({ configured: true, tiers })
+    } catch (error) {
+      res.json({
+        configured: true,
+        tiers: [],
+        loadError: error instanceof Error ? error.message : 'Failed to load pricing tiers from Zoho'
+      })
+    }
+  } catch (error) {
+    next(error)
+  }
+})
+
+adminRoutes.put('/customer-pricing-categories/catalog', async (req, res, next) => {
+  try {
+    const raw = Array.isArray(req.body) ? req.body : req.body?.tiers
+    const tiers = pricingTiersArraySchema.min(1).parse(raw)
+    const saved = await savePricingTiers(tiers)
+    appendAdminAudit({ action: 'admin_pricing_tier_catalog_replace', meta: { count: saved.length } })
+    res.json({ tiers: saved })
   } catch (error) {
     next(error)
   }

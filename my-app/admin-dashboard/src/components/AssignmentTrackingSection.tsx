@@ -12,6 +12,9 @@ export type DeliveryAssignmentRow = {
   status: string
   driverName?: string
   driverEmail?: string
+  createdAt?: string | null
+  updatedAt?: string | null
+  acceptedAt?: string | null
   deliveredAt?: string | null
   proof?: {
     recipientName?: string
@@ -22,6 +25,29 @@ export type DeliveryAssignmentRow = {
     signatureDocumentId?: string | null
     storedInZoho?: boolean
   } | null
+}
+
+/** Best timestamp for “latest first” ordering and the Updated column. */
+export function assignmentActivityMs(row: DeliveryAssignmentRow): number {
+  for (const iso of [
+    row.updatedAt,
+    row.deliveredAt,
+    row.proof?.uploadedAt,
+    row.acceptedAt,
+    row.createdAt
+  ]) {
+    const t = Date.parse(String(iso || ''))
+    if (Number.isFinite(t)) return t
+  }
+  const fromId = String(row.id || '').match(/^asg_(\d+)_/)
+  if (fromId) return Number(fromId[1])
+  return 0
+}
+
+export function formatAssignmentActivityDate(row: DeliveryAssignmentRow): string {
+  const ms = assignmentActivityMs(row)
+  if (!ms) return '—'
+  return new Date(ms).toLocaleDateString()
 }
 
 type ProofPreviewState = {
@@ -137,7 +163,7 @@ export function AssignmentTrackingSection({
         <table className="admin-table">
           <thead>
             <tr>
-              <th className="admin-th-sortable" onClick={onToggleSort} title="Sort by proof date">
+              <th className="admin-th-sortable" onClick={onToggleSort} title="Sort by latest activity (newest first by default)">
                 Updated {assignmentsSortAsc ? '▲' : '▼'}
               </th>
               <th>Invoice #</th>
@@ -173,11 +199,7 @@ export function AssignmentTrackingSection({
               return (
                 <tr key={row.id}>
                   <td style={{ fontSize: '0.8125rem', color: 'var(--admin-muted)' }}>
-                    {row.deliveredAt
-                      ? new Date(row.deliveredAt).toLocaleDateString()
-                      : row.proof?.uploadedAt
-                        ? new Date(row.proof.uploadedAt).toLocaleDateString()
-                        : '—'}
+                    {formatAssignmentActivityDate(row)}
                   </td>
                   <td style={{ fontWeight: 600 }}>{row.invoiceNumber || row.invoiceId}</td>
                   <td>{row.customerName || row.customerEmail || '—'}</td>
