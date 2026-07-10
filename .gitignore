@@ -9,3 +9,16 @@ node_modules/
 # OS / editor
 .DS_Store
 *.local
+
+# Built Android APKs/AABs (generate locally)
+releases/
+*.apk
+*.aab
+
+# Android release signing (never commit)
+*.keystore
+*.jks
+keystore.properties
+my-app/android/keystore.properties
+my-app-delivery/android/keystore.properties
+**/android/local.properties

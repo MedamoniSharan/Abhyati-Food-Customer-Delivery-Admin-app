@@ -1,4 +1,4 @@
-package com.platepro.customer;
+package com.abhyatifoodpak.delivery;
 
 import com.getcapacitor.BridgeActivity;
 

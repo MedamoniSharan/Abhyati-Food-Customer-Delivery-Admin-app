@@ -26,6 +26,107 @@ const PER_PAGE_OPTIONS = [12, 24, 48, 96] as const
 
 const STOCK_KEYS = ['stock_on_hand', 'available_stock', 'actual_available_stock', 'opening_stock'] as const
 
+const PRODUCT_TYPE_OPTIONS = ['goods', 'service', 'digital_service'] as const
+const PRODUCT_STATUS_OPTIONS = ['active', 'inactive'] as const
+
+type BulkRowDraft = {
+  name: string
+  customer_product_name: string
+  product_category_id: string
+  sku: string
+  product_type: string
+  status: string
+  rate: string
+  stock: string
+  description: string
+  unit: string
+}
+
+function resolveCategoryIdFromItem(it: ZohoItemRow): string {
+  const raw = (it as Record<string, unknown>).product_category_id
+  return typeof raw === 'string' ? raw.trim() : ''
+}
+
+function itemToBulkDraft(it: ZohoItemRow): BulkRowDraft {
+  const stock = readItemStock(it)
+  return {
+    name: String(it.name ?? ''),
+    customer_product_name: typeof it.customer_product_name === 'string' ? it.customer_product_name : '',
+    product_category_id: resolveCategoryIdFromItem(it),
+    sku: String(it.sku ?? ''),
+    product_type: String(it.product_type ?? 'goods'),
+    status: String(it.status ?? 'active'),
+    rate: it.rate != null && it.rate !== '' ? String(it.rate) : '',
+    stock: stock != null ? String(stock) : '',
+    description: String(it.description ?? ''),
+    unit: it.unit != null && String(it.unit).trim() ? String(it.unit).trim() : ''
+  }
+}
+
+function bulkDraftsEqual(a: BulkRowDraft, b: BulkRowDraft): boolean {
+  return (
+    a.name === b.name &&
+    a.customer_product_name === b.customer_product_name &&
+    a.product_category_id === b.product_category_id &&
+    a.sku === b.sku &&
+    a.product_type === b.product_type &&
+    a.status === b.status &&
+    a.rate === b.rate &&
+    a.stock === b.stock &&
+    a.description === b.description &&
+    a.unit === b.unit
+  )
+}
+
+function buildBulkSavePayload(
+  original: BulkRowDraft,
+  draft: BulkRowDraft,
+  categoriesConfigured: boolean
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {}
+  if (draft.customer_product_name !== original.customer_product_name) {
+    payload.customer_product_name = draft.customer_product_name.trim()
+  }
+  if (draft.name.trim() !== original.name.trim()) {
+    payload.name = draft.name.trim()
+  }
+  if (categoriesConfigured && draft.product_category_id !== original.product_category_id) {
+    payload.product_category_id = draft.product_category_id.trim()
+  }
+  if (draft.sku !== original.sku) {
+    payload.sku = draft.sku || undefined
+  }
+  if (draft.product_type !== original.product_type) {
+    payload.product_type = draft.product_type
+  }
+  if (draft.status !== original.status) {
+    payload.status = draft.status
+  }
+  if (draft.rate !== original.rate) {
+    const rateNum = Number(draft.rate.trim())
+    if (!Number.isFinite(rateNum)) {
+      throw new Error('Enter a valid price (rate)')
+    }
+    payload.rate = rateNum
+  }
+  if (draft.stock !== original.stock) {
+    if (draft.stock.trim() !== '') {
+      const sq = Number(draft.stock.trim())
+      if (!Number.isFinite(sq) || sq < 0) {
+        throw new Error('Enter a valid stock quantity (0 or greater)')
+      }
+      payload.stock_on_hand = sq
+    }
+  }
+  if (draft.description !== original.description) {
+    payload.description = draft.description || undefined
+  }
+  if (draft.unit !== original.unit && draft.unit.trim()) {
+    payload.unit = draft.unit.trim()
+  }
+  return payload
+}
+
 /** Zoho list/detail rows should include `item_id`; if not, save must not silently no-op. */
 function resolveItemId(item: ZohoItemRow | null | undefined): string {
   if (!item) return ''
@@ -151,6 +252,10 @@ export function ProductsSection() {
   const [imageRevByItem, setImageRevByItem] = useState<Record<string, string>>({})
   const [productsSortAsc, setProductsSortAsc] = useState(true)
   const [selectedProductIds, setSelectedProductIds] = useState<Record<string, boolean>>({})
+  const [bulkEditMode, setBulkEditMode] = useState(false)
+  const [bulkEditDraft, setBulkEditDraft] = useState<Record<string, BulkRowDraft>>({})
+  const [bulkEditOriginal, setBulkEditOriginal] = useState<Record<string, BulkRowDraft>>({})
+  const [bulkEditSaving, setBulkEditSaving] = useState(false)
   const [showAddProductModal, setShowAddProductModal] = useState(false)
   const [creatingProduct, setCreatingProduct] = useState(false)
   const [savingProduct, setSavingProduct] = useState(false)
@@ -403,6 +508,132 @@ export function ProductsSection() {
   )
   const selectedProductsCount = selectedProducts.length
 
+  const hasBulkEditChanges = useMemo(() => {
+    for (const id of Object.keys(bulkEditDraft)) {
+      const orig = bulkEditOriginal[id]
+      const draft = bulkEditDraft[id]
+      if (!orig || !draft) continue
+      if (!bulkDraftsEqual(orig, draft)) return true
+    }
+    return false
+  }, [bulkEditDraft, bulkEditOriginal])
+
+  const confirmDiscardBulkEdit = useCallback(() => {
+    if (!bulkEditMode || !hasBulkEditChanges) return true
+    return confirm('You have unsaved bulk edits. Discard them?')
+  }, [bulkEditMode, hasBulkEditChanges])
+
+  const enterBulkEditMode = useCallback(() => {
+    const draft: Record<string, BulkRowDraft> = {}
+    const original: Record<string, BulkRowDraft> = {}
+    for (const it of sortedItems) {
+      const id = resolveItemId(it)
+      if (!id) continue
+      const row = itemToBulkDraft(it)
+      draft[id] = { ...row }
+      original[id] = { ...row }
+    }
+    setBulkEditDraft(draft)
+    setBulkEditOriginal(original)
+    setBulkEditMode(true)
+  }, [sortedItems])
+
+  const exitBulkEditMode = useCallback(() => {
+    setBulkEditMode(false)
+    setBulkEditDraft({})
+    setBulkEditOriginal({})
+  }, [])
+
+  const cancelBulkEditMode = useCallback(() => {
+    if (!confirmDiscardBulkEdit()) return
+    exitBulkEditMode()
+  }, [confirmDiscardBulkEdit, exitBulkEditMode])
+
+  const guardBulkEditNavigation = useCallback(() => {
+    if (!confirmDiscardBulkEdit()) return false
+    if (bulkEditMode) exitBulkEditMode()
+    return true
+  }, [confirmDiscardBulkEdit, bulkEditMode, exitBulkEditMode])
+
+  const updateBulkDraftField = useCallback((id: string, field: keyof BulkRowDraft, value: string) => {
+    setBulkEditDraft((prev) => {
+      const row = prev[id]
+      if (!row) return prev
+      return { ...prev, [id]: { ...row, [field]: value } }
+    })
+  }, [])
+
+  const isBulkRowChanged = useCallback(
+    (id: string) => {
+      const orig = bulkEditOriginal[id]
+      const draft = bulkEditDraft[id]
+      if (!orig || !draft) return false
+      return !bulkDraftsEqual(orig, draft)
+    },
+    [bulkEditDraft, bulkEditOriginal]
+  )
+
+  const saveBulkEdits = useCallback(async () => {
+    const changedIds = Object.keys(bulkEditDraft).filter((id) => isBulkRowChanged(id))
+    if (changedIds.length === 0) {
+      toast('No changes to save', 'info')
+      exitBulkEditMode()
+      return
+    }
+    setBulkEditSaving(true)
+    let ok = 0
+    const failures: string[] = []
+    for (const id of changedIds) {
+      const original = bulkEditOriginal[id]
+      const draft = bulkEditDraft[id]
+      if (!original || !draft) continue
+      const nameTrim = draft.name.trim()
+      if (!nameTrim) {
+        failures.push(`${id}: Product name is required`)
+        continue
+      }
+      let payload: Record<string, unknown>
+      try {
+        payload = buildBulkSavePayload(original, draft, productCategoriesConfigured)
+      } catch (e) {
+        failures.push(`${id}: ${e instanceof Error ? e.message : 'Invalid values'}`)
+        continue
+      }
+      if (Object.keys(payload).length === 0) continue
+      try {
+        await adminFetch(`/api/admin/items/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        })
+        ok += 1
+      } catch (e) {
+        failures.push(`${id}: ${e instanceof Error ? e.message : 'Failed'}`)
+      }
+    }
+    setBulkEditSaving(false)
+    exitBulkEditMode()
+    if (missingPhotosMode) {
+      await loadMissingImageReport()
+    } else {
+      await loadCatalog()
+    }
+    if (failures.length > 0) {
+      toast(`Saved ${ok}; ${failures.length} failed. ${failures.slice(0, 2).join('; ')}`, 'error')
+    } else {
+      toast(`Saved ${ok} product(s)`)
+    }
+  }, [
+    bulkEditDraft,
+    bulkEditOriginal,
+    exitBulkEditMode,
+    isBulkRowChanged,
+    loadCatalog,
+    loadMissingImageReport,
+    missingPhotosMode,
+    productCategoriesConfigured,
+    toast
+  ])
+
   async function refreshAfterMutation(delayMs = 0) {
     if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs))
     if (missingPhotosMode) {
@@ -470,8 +701,7 @@ export function ProductsSection() {
 
   return (
     <>
-      <div className="admin-products-header">
-        <h2 style={{ marginTop: 0 }}>Products</h2>
+      <div className="admin-products-header" style={{ justifyContent: 'flex-end' }}>
         <button type="button" className="admin-btn admin-btn-inline admin-btn-add-product" onClick={() => setShowAddProductModal(true)}>
           Add Product
         </button>
@@ -493,6 +723,7 @@ export function ProductsSection() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
+                    if (!guardBulkEditNavigation()) return
                     runProductSearch()
                   }
                 }}
@@ -503,7 +734,10 @@ export function ProductsSection() {
               type="button"
               className="admin-btn admin-btn-inline"
               style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
-              onClick={runProductSearch}
+              onClick={() => {
+                if (!guardBulkEditNavigation()) return
+                runProductSearch()
+              }}
             >
               Search
             </button>
@@ -514,6 +748,7 @@ export function ProductsSection() {
               className="admin-btn admin-btn-inline"
               style={{ whiteSpace: 'nowrap' }}
               onClick={() => {
+                if (!guardBulkEditNavigation()) return
                 setMissingPhotosMode(false)
                 setPage(1)
               }}
@@ -526,6 +761,7 @@ export function ProductsSection() {
               className="admin-btn admin-btn-inline"
               style={{ whiteSpace: 'nowrap' }}
               onClick={() => {
+                if (!guardBulkEditNavigation()) return
                 setMissingPhotosMode(true)
                 setPage(1)
               }}
@@ -538,6 +774,10 @@ export function ProductsSection() {
             value={perPage}
             disabled={isMissingImageFilter}
             onChange={(e) => {
+              if (!guardBulkEditNavigation()) {
+                e.target.value = String(perPage)
+                return
+              }
               setPerPage(Number(e.target.value) as (typeof PER_PAGE_OPTIONS)[number])
               setPage(1)
             }}
@@ -553,7 +793,11 @@ export function ProductsSection() {
             <button
               type="button"
               className={view === 'grid' ? 'is-active' : ''}
-              onClick={() => setView('grid')}
+              onClick={() => {
+                if (view === 'grid') return
+                if (!guardBulkEditNavigation()) return
+                setView('grid')
+              }}
             >
               Grid
             </button>
@@ -577,9 +821,6 @@ export function ProductsSection() {
             >
               {categoryScanLoading ? 'Scanning all items…' : 'Scan all product categories'}
             </button>
-            <span className="admin-muted" style={{ fontSize: '0.8rem' }}>
-              Full-catalog walk; uses item detail when the list row omits custom fields.
-            </span>
           </div>
         ) : null}
         {categoryScanReport && !categoryScanLoading && categoryScanReport.configured !== false ? (
@@ -645,116 +886,149 @@ export function ProductsSection() {
               Verify with Zoho (HTTP, slower)
             </label>
           </div>
-        ) : (
-          <p className="admin-muted" style={{ margin: '0 0 12px', fontSize: '0.85rem', maxWidth: 720 }}>
-            Tip: use <strong>Show missing photos</strong> to find rows like the grey placeholders in the grid.
-          </p>
-        )}
+        ) : null}
         {view === 'table' ? (
           <div className="admin-toolbar-meta" style={{ justifyContent: 'space-between' }}>
             <span className="admin-muted">
-              {selectedProductsCount > 0 ? `${selectedProductsCount} selected` : 'Select rows to edit or delete'}
+              {bulkEditMode
+                ? hasBulkEditChanges
+                  ? 'Bulk edit mode — unsaved changes on this page'
+                  : 'Bulk edit mode — edit cells inline, then save'
+                : selectedProductsCount > 0
+                  ? `${selectedProductsCount} selected`
+                  : null}
             </span>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <IconEditButton
-                label={selectedProductsCount !== 1 ? 'Select exactly one product to edit' : 'Edit selected product'}
-                disabled={selectedProductsCount !== 1}
-                onClick={() => {
-                  if (selectedProductsCount !== 1) return
-                  setEditingItem(null)
-                  void openProductEditor(selectedProducts[0])
-                }}
-              />
-              <IconDeleteButton
-                label={selectedProductsCount === 0 ? 'Select products to delete' : 'Delete selected products'}
-                disabled={selectedProductsCount === 0}
-                onClick={async () => {
-                  if (selectedProductsCount === 0) return
-                  const ids = selectedProducts.map((it) => resolveItemId(it)).filter(Boolean)
-                  if (ids.length === 0) {
-                    toast('Cannot delete: selected rows have no Zoho item id.', 'error')
-                    return
-                  }
-                  if (!confirm(`Delete ${ids.length} selected product(s) from Zoho?`)) return
-                  const failures: string[] = []
-                  let deactivated = 0
-                  for (const id of ids) {
-                    try {
-                      const r = await adminFetch<Record<string, unknown>>(`/api/admin/items/${encodeURIComponent(id)}`, {
-                        method: 'DELETE'
-                      })
-                      if (r?.deactivated_instead_of_delete) deactivated += 1
-                    } catch (e) {
-                      failures.push(`${id}: ${e instanceof Error ? e.message : 'Failed'}`)
-                    }
-                  }
-                  setSelectedProductIds({})
-                  await refreshAfterMutation()
-                  if (failures.length > 0) {
-                    toast(`Some deletes failed (${failures.length}). ${failures.slice(0, 3).join('; ')}`, 'error')
-                  } else if (deactivated > 0) {
-                    toast(
-                      deactivated === ids.length
-                        ? `${deactivated} item(s) could not be deleted (in use). Marked inactive in Zoho instead.`
-                        : `${deactivated} marked inactive (in use); ${ids.length - deactivated} deleted.`
-                    )
-                  } else {
-                    toast(`${ids.length} product(s) deleted from Zoho`)
-                  }
-                }}
-              />
-              {productCategoriesConfigured && selectedProductsCount > 0 ? (
+              {bulkEditMode ? (
                 <>
-                  <select
-                    className="admin-select"
-                    style={{ minWidth: 160 }}
-                    value={bulkCategoryId}
-                    onChange={(e) => setBulkCategoryId(e.target.value)}
-                    aria-label="Bulk category"
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn-inline"
+                    disabled={bulkEditSaving}
+                    onClick={() => void saveBulkEdits()}
                   >
-                    <option value="">Set category…</option>
-                    <option value="__clear__">Uncategorized</option>
-                    {productCategories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    {bulkEditSaving ? 'Saving…' : 'Save changes'}
+                  </button>
                   <button
                     type="button"
                     className="admin-btn admin-btn--ghost"
-                    disabled={!bulkCategoryId}
+                    disabled={bulkEditSaving}
+                    onClick={cancelBulkEditMode}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn--ghost"
+                    disabled={sortedItems.length === 0 || loadingCatalog}
+                    onClick={enterBulkEditMode}
+                  >
+                    Bulk edit
+                  </button>
+                  <IconEditButton
+                    label={selectedProductsCount !== 1 ? 'Select exactly one product to edit' : 'Edit selected product'}
+                    disabled={selectedProductsCount !== 1}
+                    onClick={() => {
+                      if (selectedProductsCount !== 1) return
+                      setEditingItem(null)
+                      void openProductEditor(selectedProducts[0])
+                    }}
+                  />
+                  <IconDeleteButton
+                    label={selectedProductsCount === 0 ? 'Select products to delete' : 'Delete selected products'}
+                    disabled={selectedProductsCount === 0}
                     onClick={async () => {
-                      if (!bulkCategoryId) return
+                      if (selectedProductsCount === 0) return
                       const ids = selectedProducts.map((it) => resolveItemId(it)).filter(Boolean)
-                      const payloadId = bulkCategoryId === '__clear__' ? '' : bulkCategoryId
-                      let ok = 0
+                      if (ids.length === 0) {
+                        toast('Cannot delete: selected rows have no Zoho item id.', 'error')
+                        return
+                      }
+                      if (!confirm(`Delete ${ids.length} selected product(s) from Zoho?`)) return
                       const failures: string[] = []
+                      let deactivated = 0
                       for (const id of ids) {
                         try {
-                          await adminFetch(`/api/admin/items/${encodeURIComponent(id)}`, {
-                            method: 'PUT',
-                            body: JSON.stringify({ product_category_id: payloadId })
+                          const r = await adminFetch<Record<string, unknown>>(`/api/admin/items/${encodeURIComponent(id)}`, {
+                            method: 'DELETE'
                           })
-                          ok += 1
+                          if (r?.deactivated_instead_of_delete) deactivated += 1
                         } catch (e) {
                           failures.push(`${id}: ${e instanceof Error ? e.message : 'Failed'}`)
                         }
                       }
-                      setBulkCategoryId('')
                       setSelectedProductIds({})
                       await refreshAfterMutation()
                       if (failures.length > 0) {
-                        toast(`Updated ${ok}; ${failures.length} failed. ${failures.slice(0, 2).join('; ')}`, 'error')
+                        toast(`Some deletes failed (${failures.length}). ${failures.slice(0, 3).join('; ')}`, 'error')
+                      } else if (deactivated > 0) {
+                        toast(
+                          deactivated === ids.length
+                            ? `${deactivated} item(s) could not be deleted (in use). Marked inactive in Zoho instead.`
+                            : `${deactivated} marked inactive (in use); ${ids.length - deactivated} deleted.`
+                        )
                       } else {
-                        toast(`Category updated for ${ok} product(s)`)
+                        toast(`${ids.length} product(s) deleted from Zoho`)
                       }
                     }}
-                  >
-                    Apply to selected
-                  </button>
+                  />
+                  {productCategoriesConfigured && selectedProductsCount > 0 ? (
+                    <>
+                      <select
+                        className="admin-select"
+                        style={{ minWidth: 160 }}
+                        value={bulkCategoryId}
+                        onChange={(e) => setBulkCategoryId(e.target.value)}
+                        aria-label="Bulk category"
+                      >
+                        <option value="">Set category…</option>
+                        <option value="__clear__">Uncategorized</option>
+                        {productCategories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn--ghost"
+                        disabled={!bulkCategoryId}
+                        onClick={async () => {
+                          if (!bulkCategoryId) return
+                          const ids = selectedProducts.map((it) => resolveItemId(it)).filter(Boolean)
+                          const payloadId = bulkCategoryId === '__clear__' ? '' : bulkCategoryId
+                          let ok = 0
+                          const failures: string[] = []
+                          for (const id of ids) {
+                            try {
+                              await adminFetch(`/api/admin/items/${encodeURIComponent(id)}`, {
+                                method: 'PUT',
+                                body: JSON.stringify({ product_category_id: payloadId })
+                              })
+                              ok += 1
+                            } catch (e) {
+                              failures.push(`${id}: ${e instanceof Error ? e.message : 'Failed'}`)
+                            }
+                          }
+                          setBulkCategoryId('')
+                          setSelectedProductIds({})
+                          await refreshAfterMutation()
+                          if (failures.length > 0) {
+                            toast(`Updated ${ok}; ${failures.length} failed. ${failures.slice(0, 2).join('; ')}`, 'error')
+                          } else {
+                            toast(`Category updated for ${ok} product(s)`)
+                          }
+                        }}
+                      >
+                        Apply to selected
+                      </button>
+                    </>
+                  ) : null}
                 </>
-              ) : null}
+              )}
             </div>
           </div>
         ) : null}
@@ -857,8 +1131,9 @@ export function ProductsSection() {
         ) : (
           <div className="admin-busy-host">
             {showCatalogBodyOverlay ? <AdminBusyOverlay label="Updating catalog…" /> : null}
+            {bulkEditSaving ? <AdminBusyOverlay label="Saving changes…" /> : null}
             <div className="admin-table-wrap admin-table-wrap--tight">
-            <table className="admin-table admin-table--products">
+            <table className={`admin-table admin-table--products${bulkEditMode ? ' admin-table--bulk-edit' : ''}`}>
               <thead>
                 <tr>
                   <th>
@@ -883,6 +1158,7 @@ export function ProductsSection() {
                   <th className="admin-th-sortable" onClick={() => setProductsSortAsc((v) => !v)} title="Sort by name">
                     Name {productsSortAsc ? '▲' : '▼'}
                   </th>
+                  <th>Customer product name</th>
                   <th>Category</th>
                   <th>SKU</th>
                   <th>Type</th>
@@ -905,6 +1181,7 @@ export function ProductsSection() {
                         <td><div className="admin-skeleton admin-skeleton--line" /></td>
                         <td><div className="admin-skeleton admin-skeleton--line" /></td>
                         <td><div className="admin-skeleton admin-skeleton--line" /></td>
+                        <td><div className="admin-skeleton admin-skeleton--line" /></td>
                         <td><div className="admin-skeleton admin-skeleton--pill" /></td>
                         <td><div className="admin-skeleton admin-skeleton--line" /></td>
                         <td><div className="admin-skeleton admin-skeleton--line" /></td>
@@ -915,8 +1192,14 @@ export function ProductsSection() {
                   : sortedItems.map((it) => {
                       const id = resolveItemId(it)
                       const name = String(it.name ?? 'Item')
+                      const draft = id ? bulkEditDraft[id] : undefined
+                      const rowChanged = id ? isBulkRowChanged(id) : false
                       return (
-                        <tr key={id || name} className="admin-table-row-clickable" onClick={() => void openProductEditor(it)}>
+                        <tr
+                          key={id || name}
+                          className={`${bulkEditMode ? '' : 'admin-table-row-clickable'}${rowChanged ? ' admin-table-row--changed' : ''}`}
+                          onClick={bulkEditMode ? undefined : () => void openProductEditor(it)}
+                        >
                           <td>
                             <input
                               type="checkbox"
@@ -936,29 +1219,153 @@ export function ProductsSection() {
                               {id ? <ItemThumb itemId={id} label={name} cacheBust={imageRevByItem[id]} /> : null}
                             </div>
                           </td>
-                          <td className="admin-td-strong">{name}</td>
-                          <td>{String((it as Record<string, unknown>).product_category_name || '—')}</td>
-                          <td>{String(it.sku ?? '—')}</td>
-                          <td>{String(it.product_type ?? '—')}</td>
-                          <td>
-                            <span
-                              className={
-                                String(it.status).toLowerCase() === 'active'
-                                  ? 'admin-pill'
-                                  : 'admin-pill admin-pill--muted'
-                              }
-                            >
-                              {String(it.status ?? '—')}
-                            </span>
+                          <td className="admin-td-strong">
+                            {bulkEditMode && draft && id ? (
+                              <input
+                                className="admin-table-input"
+                                value={draft.name}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateBulkDraftField(id, 'name', e.target.value)}
+                                aria-label={`Name for ${name}`}
+                              />
+                            ) : (
+                              name
+                            )}
                           </td>
-                          <td>{String(it.rate ?? '—')}</td>
-                          <td>{readItemStock(it) ?? '—'}</td>
+                          <td>
+                            {bulkEditMode && draft && id ? (
+                              <input
+                                className="admin-table-input"
+                                value={draft.customer_product_name}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateBulkDraftField(id, 'customer_product_name', e.target.value)}
+                                aria-label={`Customer product name for ${name}`}
+                                placeholder="Customer product name"
+                              />
+                            ) : (
+                              String(it.customer_product_name || '—').trim() || '—'
+                            )}
+                          </td>
+                          <td>
+                            {bulkEditMode && draft && id && productCategoriesConfigured ? (
+                              <select
+                                className="admin-table-select"
+                                value={draft.product_category_id}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateBulkDraftField(id, 'product_category_id', e.target.value)}
+                                aria-label={`Category for ${name}`}
+                              >
+                                <option value="">Uncategorized</option>
+                                {productCategories.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : bulkEditMode && draft && id ? (
+                              String((it as Record<string, unknown>).product_category_name || '—')
+                            ) : (
+                              String((it as Record<string, unknown>).product_category_name || '—')
+                            )}
+                          </td>
+                          <td>
+                            {bulkEditMode && draft && id ? (
+                              <input
+                                className="admin-table-input"
+                                value={draft.sku}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateBulkDraftField(id, 'sku', e.target.value)}
+                                aria-label={`SKU for ${name}`}
+                              />
+                            ) : (
+                              String(it.sku ?? '—')
+                            )}
+                          </td>
+                          <td>
+                            {bulkEditMode && draft && id ? (
+                              <select
+                                className="admin-table-select"
+                                value={draft.product_type}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateBulkDraftField(id, 'product_type', e.target.value)}
+                                aria-label={`Type for ${name}`}
+                              >
+                                {PRODUCT_TYPE_OPTIONS.map((t) => (
+                                  <option key={t} value={t}>
+                                    {t}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              String(it.product_type ?? '—')
+                            )}
+                          </td>
+                          <td>
+                            {bulkEditMode && draft && id ? (
+                              <select
+                                className="admin-table-select"
+                                value={draft.status}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateBulkDraftField(id, 'status', e.target.value)}
+                                aria-label={`Status for ${name}`}
+                              >
+                                {PRODUCT_STATUS_OPTIONS.map((s) => (
+                                  <option key={s} value={s}>
+                                    {s}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span
+                                className={
+                                  String(it.status).toLowerCase() === 'active'
+                                    ? 'admin-pill'
+                                    : 'admin-pill admin-pill--muted'
+                                }
+                              >
+                                {String(it.status ?? '—')}
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            {bulkEditMode && draft && id ? (
+                              <input
+                                className="admin-table-input admin-table-input--narrow"
+                                value={draft.rate}
+                                inputMode="decimal"
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateBulkDraftField(id, 'rate', e.target.value)}
+                                aria-label={`Rate for ${name}`}
+                              />
+                            ) : (
+                              String(it.rate ?? '—')
+                            )}
+                          </td>
+                          <td>
+                            {bulkEditMode && draft && id ? (
+                              <input
+                                className="admin-table-input admin-table-input--narrow"
+                                value={draft.stock}
+                                inputMode="numeric"
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateBulkDraftField(id, 'stock', e.target.value)}
+                                aria-label={`Stock for ${name}`}
+                              />
+                            ) : (
+                              readItemStock(it) ?? '—'
+                            )}
+                          </td>
                           <td className="admin-td-mono">{id}</td>
                           <td>
                             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-                              <IconEditButton label={`Edit ${name}`} onClick={() => void openProductEditor(it)} />
+                              <IconEditButton
+                                label={`Edit ${name}`}
+                                disabled={bulkEditMode}
+                                onClick={() => void openProductEditor(it)}
+                              />
                               <IconDeleteButton
                                 label={`Delete ${name}`}
+                                disabled={bulkEditMode}
                                 onClick={async () => {
                                   if (!id) {
                                     toast('Cannot delete: this row has no Zoho item id.', 'error')
@@ -1006,7 +1413,10 @@ export function ProductsSection() {
             type="button"
             className="admin-btn admin-btn--ghost"
             disabled={!hasPrev || loadingCatalog || isMissingImageFilter}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => {
+              if (!guardBulkEditNavigation()) return
+              setPage((p) => Math.max(1, p - 1))
+            }}
           >
             Previous
           </button>
@@ -1024,7 +1434,10 @@ export function ProductsSection() {
             type="button"
             className="admin-btn admin-btn--ghost"
             disabled={!hasNext || loadingCatalog || isMissingImageFilter}
-            onClick={() => setPage((p) => p + 1)}
+            onClick={() => {
+              if (!guardBulkEditNavigation()) return
+              setPage((p) => p + 1)
+            }}
           >
             Next
           </button>

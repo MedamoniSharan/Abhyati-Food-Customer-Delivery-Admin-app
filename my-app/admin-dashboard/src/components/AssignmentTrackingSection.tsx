@@ -112,11 +112,6 @@ export function AssignmentTrackingSection({
 
   return (
     <>
-      <h2 style={{ marginTop: 0 }}>Assignment tracking & proof</h2>
-      <p style={{ color: 'var(--admin-muted)', fontSize: '0.875rem', maxWidth: 760, lineHeight: 1.55, marginBottom: 14 }}>
-        Track driver assignment status and uploaded proof-of-delivery metadata. Download proof files directly from this
-        table.
-      </p>
       <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <button
           type="button"

@@ -1290,6 +1290,42 @@ button, input, select, textarea {
 
 .admin-table--products .admin-th-thumb { width: 64px; }
 
+.admin-table--bulk-edit .admin-table-input,
+.admin-table--bulk-edit .admin-table-select {
+  width: 100%;
+  min-width: 72px;
+  max-width: 220px;
+  padding: 4px 8px;
+  font-size: 0.8125rem;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-sm);
+  background: var(--admin-surface);
+  color: var(--admin-text);
+}
+
+.admin-table--bulk-edit .admin-table-input--narrow {
+  max-width: 88px;
+  min-width: 56px;
+}
+
+.admin-table--bulk-edit .admin-table-input:focus,
+.admin-table--bulk-edit .admin-table-select:focus {
+  outline: 2px solid color-mix(in srgb, var(--admin-accent) 35%, transparent);
+  border-color: var(--admin-accent);
+}
+
+.admin-table--bulk-edit td {
+  vertical-align: middle;
+}
+
+.admin-table-row--changed {
+  background: color-mix(in srgb, var(--admin-accent) 6%, var(--admin-surface));
+}
+
+.admin-table-row--changed td:first-child {
+  box-shadow: inset 3px 0 0 var(--admin-accent);
+}
+
 .admin-table-thumb-wrap {
   width: 48px;
   height: 48px;

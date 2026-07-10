@@ -3,6 +3,10 @@ import { z } from 'zod'
 import { env } from '../config/env.js'
 import { getModuleById, updateModule } from './zohoBooksService.js'
 import { getCustomFieldValue } from './customerPricingZohoService.js'
+import {
+  getZohoItemCustomerDisplayFieldId,
+  itemListRowNeedsCustomerProductNameHydration
+} from './zohoItemCustomerDisplay.js'
 
 const categoryEntrySchema = z.object({
   id: z.string().min(1).max(80),
@@ -156,13 +160,20 @@ export function itemListRowNeedsProductCategoryHydration(item) {
  * @returns {Promise<{ items: unknown[], detail_fetches: number }>}
  */
 export async function hydrateItemsListRowsForProductCategoryField(items, { concurrency = 12 } = {}) {
-  if (!isProductCategoryConfigured() || !Array.isArray(items)) {
+  const hydrationConfigured =
+    isProductCategoryConfigured() || Boolean(getZohoItemCustomerDisplayFieldId())
+  if (!hydrationConfigured || !Array.isArray(items)) {
     return { items: Array.isArray(items) ? items : [], detail_fetches: 0 }
   }
 
   const needIdx = []
   for (let i = 0; i < items.length; i += 1) {
-    if (itemListRowNeedsProductCategoryHydration(items[i])) needIdx.push(i)
+    if (
+      itemListRowNeedsProductCategoryHydration(items[i]) ||
+      itemListRowNeedsCustomerProductNameHydration(items[i])
+    ) {
+      needIdx.push(i)
+    }
   }
   if (needIdx.length === 0) return { items, detail_fetches: 0 }
 

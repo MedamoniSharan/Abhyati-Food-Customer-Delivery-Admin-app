@@ -16,6 +16,19 @@ export function getItemCustomerProductNameFromZoho(item) {
 }
 
 /**
+ * Zoho GET /items list rows often omit `custom_fields` or omit the row for an empty value.
+ * Detail GET fills `custom_fields` so customer product name reads match the Zoho UI.
+ */
+export function itemListRowNeedsCustomerProductNameHydration(item) {
+  const fid = getZohoItemCustomerDisplayFieldId()
+  if (!fid || !item || typeof item !== 'object') return false
+  const cfs = item.custom_fields
+  if (!Array.isArray(cfs)) return true
+  const row = cfs.find((x) => String(x?.customfield_id ?? x?.customfieldid ?? '') === fid)
+  return !row
+}
+
+/**
  * Merge customer display name into an item's `custom_fields` for Zoho PUT.
  * @param {object|null|undefined} existingItem
  * @param {string} customerProductNameTrimmed

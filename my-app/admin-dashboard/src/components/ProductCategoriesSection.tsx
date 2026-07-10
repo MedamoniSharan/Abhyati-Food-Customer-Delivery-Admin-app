@@ -97,10 +97,6 @@ export function ProductCategoriesSection() {
 
   return (
     <section>
-      <div className="admin-products-header">
-        <h2 style={{ marginTop: 0 }}>Product categories</h2>
-      </div>
-
       {!configured ? (
         <div className="admin-card" style={{ padding: 20 }}>
           {envStatus ? (

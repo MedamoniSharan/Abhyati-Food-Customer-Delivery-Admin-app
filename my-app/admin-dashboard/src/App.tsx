@@ -104,6 +104,16 @@ type CustomerTableRow = {
   createdTime: string
 }
 
+type CustomerBulkRowDraft = {
+  fullName: string
+  email: string
+  mobile: string
+  pricingTierId: string
+  disabled: boolean
+  hasAppLogin: boolean
+  lookupEmail: string
+}
+
 type PricingTierRow = { id: string; name: string; discountPercent?: number; discountAmountInr?: number }
 
 type CustomerListSort = 'name_asc' | 'name_desc' | 'newest'
@@ -169,6 +179,29 @@ function pickFirstCustomerEmail(...parts: string[]): string {
     if (t.includes('@')) return t
   }
   return ''
+}
+
+function customerRowToBulkDraft(c: CustomerTableRow): CustomerBulkRowDraft {
+  const email = pickFirstCustomerEmail(c.lookupEmail, c.zohoTopEmail, c.primaryPersonEmail)
+  return {
+    fullName: c.fullName === '—' ? '' : c.fullName,
+    email,
+    mobile: c.mobile === '—' ? '' : c.mobile,
+    pricingTierId: c.pricingTierId || '',
+    disabled: c.disabled,
+    hasAppLogin: c.hasAppLogin,
+    lookupEmail: c.lookupEmail
+  }
+}
+
+function customerBulkDraftsEqual(a: CustomerBulkRowDraft, b: CustomerBulkRowDraft): boolean {
+  return (
+    a.fullName === b.fullName &&
+    a.email === b.email &&
+    a.mobile === b.mobile &&
+    a.pricingTierId === b.pricingTierId &&
+    a.disabled === b.disabled
+  )
 }
 
 function SidebarIcon({
@@ -331,6 +364,10 @@ export default function App() {
     page: 1
   })
   const [selectedCustomerContactIds, setSelectedCustomerContactIds] = useState<Record<string, boolean>>({})
+  const [customerBulkEditMode, setCustomerBulkEditMode] = useState(false)
+  const [customerBulkEditDraft, setCustomerBulkEditDraft] = useState<Record<string, CustomerBulkRowDraft>>({})
+  const [customerBulkEditOriginal, setCustomerBulkEditOriginal] = useState<Record<string, CustomerBulkRowDraft>>({})
+  const [customerBulkEditSaving, setCustomerBulkEditSaving] = useState(false)
   const [, setZohoCustomersLoading] = useState(false)
   const [customerSearch, setCustomerSearch] = useState('')
   const [customerCategoryFilter, setCustomerCategoryFilter] = useState('')
@@ -342,6 +379,7 @@ export default function App() {
   const [driversSortAsc, setDriversSortAsc] = useState(true)
   const [driversPage, setDriversPage] = useState(1)
   const [selectedDriverEmails, setSelectedDriverEmails] = useState<Record<string, boolean>>({})
+  const [driversRefreshing, setDriversRefreshing] = useState(false)
   const [deliveriesSortAsc, setDeliveriesSortAsc] = useState(true)
   const [deliveriesPage, setDeliveriesPage] = useState(1)
   const [selectedDeliveryIds, setSelectedDeliveryIds] = useState<Record<string, boolean>>({})
@@ -408,9 +446,17 @@ export default function App() {
     [customersPage, customerSearch, customerCategoryFilter, customerListSort]
   )
 
-  const refreshDrivers = useCallback(async () => {
-    const r = await adminFetch<{ drivers: typeof drivers }>('/api/admin/drivers')
-    setDrivers(r.drivers || [])
+  const refreshDrivers = useCallback(async (opts?: { delayMs?: number }) => {
+    if (opts?.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs))
+    setDriversRefreshing(true)
+    try {
+      const r = await adminFetch<{ drivers: typeof drivers }>('/api/admin/drivers')
+      const list = r.drivers || []
+      setDrivers(list)
+      return list
+    } finally {
+      setDriversRefreshing(false)
+    }
   }, [])
 
   const refreshDeliveries = useCallback(async () => {
@@ -584,6 +630,161 @@ export default function App() {
       toast(e instanceof Error ? e.message : 'Failed', 'error')
     }
   }, [selectedCustomersForDelete, refreshCustomers, toast])
+
+  const hasCustomerBulkEditChanges = useMemo(() => {
+    for (const id of Object.keys(customerBulkEditDraft)) {
+      const orig = customerBulkEditOriginal[id]
+      const draft = customerBulkEditDraft[id]
+      if (!orig || !draft) continue
+      if (!customerBulkDraftsEqual(orig, draft)) return true
+    }
+    return false
+  }, [customerBulkEditDraft, customerBulkEditOriginal])
+
+  const confirmDiscardCustomerBulkEdit = useCallback(() => {
+    if (!customerBulkEditMode || !hasCustomerBulkEditChanges) return true
+    return confirm('You have unsaved bulk edits. Discard them?')
+  }, [customerBulkEditMode, hasCustomerBulkEditChanges])
+
+  const exitCustomerBulkEditMode = useCallback(() => {
+    setCustomerBulkEditMode(false)
+    setCustomerBulkEditDraft({})
+    setCustomerBulkEditOriginal({})
+  }, [])
+
+  const guardCustomerBulkEditNavigation = useCallback(() => {
+    if (!confirmDiscardCustomerBulkEdit()) return false
+    if (customerBulkEditMode) exitCustomerBulkEditMode()
+    return true
+  }, [confirmDiscardCustomerBulkEdit, customerBulkEditMode, exitCustomerBulkEditMode])
+
+  const enterCustomerBulkEditMode = useCallback(() => {
+    const draft: Record<string, CustomerBulkRowDraft> = {}
+    const original: Record<string, CustomerBulkRowDraft> = {}
+    for (const c of customerRows) {
+      if (!c.contactId) continue
+      const row = customerRowToBulkDraft(c)
+      draft[c.contactId] = { ...row }
+      original[c.contactId] = { ...row }
+    }
+    setCustomerBulkEditDraft(draft)
+    setCustomerBulkEditOriginal(original)
+    setCustomerBulkEditMode(true)
+  }, [customerRows])
+
+  const cancelCustomerBulkEditMode = useCallback(() => {
+    if (!confirmDiscardCustomerBulkEdit()) return
+    exitCustomerBulkEditMode()
+  }, [confirmDiscardCustomerBulkEdit, exitCustomerBulkEditMode])
+
+  const updateCustomerBulkDraftField = useCallback(
+    (contactId: string, field: keyof CustomerBulkRowDraft, value: string | boolean) => {
+      setCustomerBulkEditDraft((prev) => {
+        const row = prev[contactId]
+        if (!row) return prev
+        return { ...prev, [contactId]: { ...row, [field]: value } }
+      })
+    },
+    []
+  )
+
+  const isCustomerBulkRowChanged = useCallback(
+    (contactId: string) => {
+      const orig = customerBulkEditOriginal[contactId]
+      const draft = customerBulkEditDraft[contactId]
+      if (!orig || !draft) return false
+      return !customerBulkDraftsEqual(orig, draft)
+    },
+    [customerBulkEditDraft, customerBulkEditOriginal]
+  )
+
+  const saveCustomerBulkEdits = useCallback(async () => {
+    const changedIds = Object.keys(customerBulkEditDraft).filter((id) => isCustomerBulkRowChanged(id))
+    if (changedIds.length === 0) {
+      toast('No changes to save', 'info')
+      exitCustomerBulkEditMode()
+      return
+    }
+    setCustomerBulkEditSaving(true)
+    let ok = 0
+    const failures: string[] = []
+    for (const contactId of changedIds) {
+      const original = customerBulkEditOriginal[contactId]
+      const draft = customerBulkEditDraft[contactId]
+      if (!original || !draft) continue
+      const nameTrim = draft.fullName.trim()
+      if (nameTrim.length < 2) {
+        failures.push(`${contactId}: Full name must be at least 2 characters`)
+        continue
+      }
+      const emailTrim = draft.email.trim()
+      if (emailTrim && !emailTrim.includes('@')) {
+        failures.push(`${contactId}: Enter a valid email`)
+        continue
+      }
+      try {
+        const profileChanged =
+          draft.fullName !== original.fullName ||
+          draft.email !== original.email ||
+          draft.mobile !== original.mobile
+        if (profileChanged) {
+          const mobile = draft.mobile.trim()
+          if (draft.hasAppLogin && original.lookupEmail.includes('@')) {
+            await adminFetch(`/api/admin/customers/${encodeURIComponent(original.lookupEmail)}`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                fullName: nameTrim,
+                ...(emailTrim ? { email: emailTrim } : {}),
+                ...(mobile ? { mobile } : {})
+              })
+            })
+          } else {
+            await adminFetch(`/api/admin/customers/contact/${encodeURIComponent(contactId)}`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                fullName: nameTrim,
+                ...(emailTrim ? { email: emailTrim } : {}),
+                mobile,
+                ...(original.lookupEmail.includes('@') ? { currentEmail: original.lookupEmail } : {})
+              })
+            })
+          }
+        }
+        if (pricingConfigured && draft.pricingTierId !== original.pricingTierId) {
+          await adminFetch(`/api/admin/customers/contact/${encodeURIComponent(contactId)}/pricing-category`, {
+            method: 'PUT',
+            body: JSON.stringify({ tierId: draft.pricingTierId || null })
+          })
+        }
+        if (draft.disabled !== original.disabled) {
+          await adminFetch(`/api/admin/customers/contact/${encodeURIComponent(contactId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ disabled: draft.disabled })
+          })
+        }
+        ok += 1
+      } catch (e) {
+        failures.push(`${contactId}: ${e instanceof Error ? e.message : 'Failed'}`)
+      }
+    }
+    setCustomerBulkEditSaving(false)
+    exitCustomerBulkEditMode()
+    await refreshCustomers()
+    if (failures.length > 0) {
+      toast(`Saved ${ok}; ${failures.length} failed. ${failures.slice(0, 2).join('; ')}`, 'error')
+    } else {
+      toast(`Saved ${ok} customer(s)`)
+    }
+  }, [
+    customerBulkEditDraft,
+    customerBulkEditOriginal,
+    exitCustomerBulkEditMode,
+    isCustomerBulkRowChanged,
+    pricingConfigured,
+    refreshCustomers,
+    toast
+  ])
+
   const sortedDrivers = useMemo(
     () =>
       [...drivers].sort((a, b) =>
@@ -592,6 +793,59 @@ export default function App() {
     [drivers, driversSortAsc]
   )
   const driversPaged = useMemo(() => paginateRows(sortedDrivers, driversPage, TABLE_PAGE_SIZE), [sortedDrivers, driversPage])
+
+  const selectedDriversForDelete = useMemo(
+    () =>
+      drivers
+        .filter((d) => selectedDriverEmails[d.email])
+        .map((d) => ({
+          email: d.email,
+          zohoContactId: String(d.zohoContactId || d.id || '').trim()
+        }))
+        .filter((d) => d.zohoContactId),
+    [drivers, selectedDriverEmails]
+  )
+
+  const handleDeleteSelectedDrivers = useCallback(async () => {
+    if (selectedDriversForDelete.length === 0) {
+      toast('Select at least one driver to delete.', 'info')
+      return
+    }
+    if (!confirm(`Remove ${selectedDriversForDelete.length} selected driver(s)?`)) return
+    let ok = 0
+    const failures: string[] = []
+    const deletedZids = new Set<string>()
+    const deletedEmails = new Set<string>()
+    for (const { email, zohoContactId } of selectedDriversForDelete) {
+      try {
+        await adminFetch(`/api/admin/drivers/zoho/${encodeURIComponent(zohoContactId)}`, { method: 'DELETE' })
+        ok += 1
+        deletedZids.add(zohoContactId)
+        deletedEmails.add(email)
+      } catch (e) {
+        failures.push(`${email}: ${e instanceof Error ? e.message : 'Failed'}`)
+      }
+    }
+    if (deletedZids.size > 0) {
+      setDrivers((prev) =>
+        prev.filter((row) => !deletedZids.has(String(row.zohoContactId || row.id || '').trim()))
+      )
+      setSelectedDriverEmails((prev) => {
+        const next = { ...prev }
+        for (const em of deletedEmails) delete next[em]
+        return next
+      })
+    }
+    const list = await refreshDrivers({ delayMs: 250 })
+    const totalPages = Math.max(1, Math.ceil(list.length / TABLE_PAGE_SIZE))
+    setDriversPage((p) => Math.min(p, totalPages))
+    if (failures.length > 0) {
+      toast(`Removed ${ok}; ${failures.length} failed. ${failures.slice(0, 2).join('; ')}`, 'error')
+    } else {
+      toast(`Removed ${ok} driver(s)`)
+    }
+  }, [selectedDriversForDelete, refreshDrivers, toast])
+
   const sortedDeliveries = useMemo(
     () =>
       [...deliveries].sort((a, b) =>
@@ -775,17 +1029,18 @@ export default function App() {
 
           {page === 'customers' ? (
             <>
-              <div className="admin-products-header">
-                <h2 style={{ marginTop: 0 }}>Customers</h2>
+              <div className="admin-products-header" style={{ justifyContent: 'flex-end' }}>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    type="button"
-                    className="admin-btn admin-btn--ghost admin-btn-inline"
-                    disabled={selectedCustomersForDelete.length === 0}
-                    onClick={() => void handleDeleteSelectedCustomers()}
-                  >
-                    Delete selected ({selectedCustomersForDelete.length})
-                  </button>
+                  {!customerBulkEditMode ? (
+                    <button
+                      type="button"
+                      className="admin-btn admin-btn--ghost admin-btn-inline"
+                      disabled={selectedCustomersForDelete.length === 0}
+                      onClick={() => void handleDeleteSelectedCustomers()}
+                    >
+                      Delete selected ({selectedCustomersForDelete.length})
+                    </button>
+                  ) : null}
                   <button type="button" className="admin-btn admin-btn-inline" onClick={() => setShowAddCustomerModal(true)}>
                     Add Customer
                   </button>
@@ -800,7 +1055,11 @@ export default function App() {
                       className="admin-toolbar__search-input"
                       placeholder="Search by name, email, or mobile…"
                       value={customerSearch}
-                      onChange={(e) => { setCustomerSearch(e.target.value); setCustomersPage(1) }}
+                      onChange={(e) => {
+                        if (!guardCustomerBulkEditNavigation()) return
+                        setCustomerSearch(e.target.value)
+                        setCustomersPage(1)
+                      }}
                       aria-label="Search customers"
                     />
                   </div>
@@ -808,6 +1067,10 @@ export default function App() {
                     className="admin-select"
                     value={pricingConfigured ? customerCategoryFilter : ''}
                     onChange={(e) => {
+                      if (!guardCustomerBulkEditNavigation()) {
+                        e.target.value = customerCategoryFilter
+                        return
+                      }
                       setCustomerCategoryFilter(e.target.value)
                       setCustomersPage(1)
                     }}
@@ -828,12 +1091,48 @@ export default function App() {
                     ))}
                   </select>
                 </div>
-                <div className="admin-toolbar-meta" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+                <div className="admin-toolbar-meta" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                   <span className="admin-muted">
-                    ~{customersMeta.total} in Zoho · this page {customerRows.length}
-                    {customerCategoryFilter ? ' · category filter applies to this Zoho page only' : ''}
+                    {customerBulkEditMode
+                      ? hasCustomerBulkEditChanges
+                        ? 'Bulk edit mode — unsaved changes on this page'
+                        : 'Bulk edit mode — edit cells inline, then save'
+                      : `~${customersMeta.total} in Zoho · this page ${customerRows.length}${
+                          customerCategoryFilter ? ' · category filter applies to this Zoho page only' : ''
+                        }`}
                   </span>
-                  {customersLoading ? <AdminInlineSpinner label="Loading customers…" /> : null}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {customerBulkEditMode ? (
+                      <>
+                        <button
+                          type="button"
+                          className="admin-btn admin-btn-inline"
+                          disabled={customerBulkEditSaving || customersLoading}
+                          onClick={() => void saveCustomerBulkEdits()}
+                        >
+                          {customerBulkEditSaving ? 'Saving…' : 'Save changes'}
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-btn admin-btn--ghost"
+                          disabled={customerBulkEditSaving}
+                          onClick={cancelCustomerBulkEditMode}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn--ghost"
+                        disabled={customerRows.length === 0 || customersLoading}
+                        onClick={enterCustomerBulkEditMode}
+                      >
+                        Bulk edit
+                      </button>
+                    )}
+                    {customersLoading ? <AdminInlineSpinner label="Loading customers…" /> : null}
+                  </div>
                 </div>
                 <div className="admin-toolbar" style={{ marginTop: 12, flexWrap: 'wrap', gap: 12 }}>
                   <label className="admin-muted" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -842,6 +1141,10 @@ export default function App() {
                       className="admin-select"
                       value={customerListSort}
                       onChange={(e) => {
+                        if (!guardCustomerBulkEditNavigation()) {
+                          e.target.value = customerListSort
+                          return
+                        }
                         setCustomerListSort(e.target.value as CustomerListSort)
                         setCustomersPage(1)
                       }}
@@ -858,8 +1161,9 @@ export default function App() {
               ) : (
                 <div className="admin-busy-host" style={{ minHeight: customerRows.length > 0 ? 120 : 0 }}>
                   {customersLoading && customerRows.length > 0 ? <AdminBusyOverlay label="Updating customers…" /> : null}
+                  {customerBulkEditSaving ? <AdminBusyOverlay label="Saving changes…" /> : null}
                   <div className="admin-table-wrap">
-                    <table className="admin-table">
+                    <table className={`admin-table${customerBulkEditMode ? ' admin-table--bulk-edit' : ''}`}>
                       <thead>
                         <tr>
                           <th>
@@ -899,8 +1203,11 @@ export default function App() {
                             </td>
                           </tr>
                         ) : null}
-                        {customerRows.map((c) => (
-                          <tr key={c.key}>
+                        {customerRows.map((c) => {
+                          const draft = c.contactId ? customerBulkEditDraft[c.contactId] : undefined
+                          const rowChanged = c.contactId ? isCustomerBulkRowChanged(c.contactId) : false
+                          return (
+                          <tr key={c.key} className={rowChanged ? 'admin-table-row--changed' : undefined}>
                             <td>
                               <input
                                 type="checkbox"
@@ -913,11 +1220,59 @@ export default function App() {
                                 }
                               />
                             </td>
-                            <td>{c.fullName}</td>
-                            <td>{c.email}</td>
-                            <td>{c.mobile}</td>
                             <td>
-                              {c.contactId && pricingConfigured ? (
+                              {customerBulkEditMode && draft && c.contactId ? (
+                                <input
+                                  className="admin-table-input"
+                                  value={draft.fullName}
+                                  onChange={(e) => updateCustomerBulkDraftField(c.contactId, 'fullName', e.target.value)}
+                                  aria-label={`Name for ${c.fullName}`}
+                                />
+                              ) : (
+                                c.fullName
+                              )}
+                            </td>
+                            <td>
+                              {customerBulkEditMode && draft && c.contactId ? (
+                                <input
+                                  className="admin-table-input"
+                                  type="email"
+                                  value={draft.email}
+                                  onChange={(e) => updateCustomerBulkDraftField(c.contactId, 'email', e.target.value)}
+                                  aria-label={`Email for ${c.fullName}`}
+                                />
+                              ) : (
+                                c.email
+                              )}
+                            </td>
+                            <td>
+                              {customerBulkEditMode && draft && c.contactId ? (
+                                <input
+                                  className="admin-table-input"
+                                  value={draft.mobile}
+                                  onChange={(e) => updateCustomerBulkDraftField(c.contactId, 'mobile', e.target.value)}
+                                  aria-label={`Mobile for ${c.fullName}`}
+                                />
+                              ) : (
+                                c.mobile
+                              )}
+                            </td>
+                            <td>
+                              {customerBulkEditMode && draft && c.contactId && pricingConfigured ? (
+                                <select
+                                  className="admin-table-select"
+                                  value={draft.pricingTierId}
+                                  onChange={(e) => updateCustomerBulkDraftField(c.contactId, 'pricingTierId', e.target.value)}
+                                  aria-label={`Customer category for ${c.fullName}`}
+                                >
+                                  <option value="">None</option>
+                                  {pricingTiers.map((t) => (
+                                    <option key={t.id} value={t.id}>
+                                      {t.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : c.contactId && pricingConfigured && !customerBulkEditMode ? (
                                 <select
                                   className="admin-select"
                                   style={{ maxWidth: 200, fontSize: '0.85rem' }}
@@ -958,41 +1313,56 @@ export default function App() {
                               )}
                             </td>
                             <td>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
-                                {Boolean(c.disabled) ? (
-                                  <span className="admin-pill-warn admin-pill">Inactive</span>
-                                ) : (
-                                  <span className="admin-pill">Active</span>
-                                )}
-                                {c.contactId ? (
-                                  <button
-                                    type="button"
-                                    className="admin-btn admin-btn--ghost"
-                                    style={{ fontSize: '0.75rem', padding: '2px 8px' }}
-                                    onClick={async () => {
-                                      const nextDisabled = !Boolean(c.disabled)
-                                      try {
-                                        await adminFetch(`/api/admin/customers/contact/${encodeURIComponent(c.contactId)}`, {
-                                          method: 'PATCH',
-                                          body: JSON.stringify({ disabled: nextDisabled })
-                                        })
-                                        await refreshCustomers()
-                                        toast(nextDisabled ? 'Customer deactivated in Zoho' : 'Customer activated in Zoho', 'info')
-                                      } catch (e) {
-                                        toast(e instanceof Error ? e.message : 'Failed', 'error')
-                                      }
-                                    }}
-                                  >
-                                    {Boolean(c.disabled) ? 'Activate' : 'Deactivate'}
-                                  </button>
-                                ) : null}
-                              </div>
+                              {customerBulkEditMode && draft && c.contactId ? (
+                                <select
+                                  className="admin-table-select"
+                                  value={draft.disabled ? 'inactive' : 'active'}
+                                  onChange={(e) =>
+                                    updateCustomerBulkDraftField(c.contactId, 'disabled', e.target.value === 'inactive')
+                                  }
+                                  aria-label={`Zoho status for ${c.fullName}`}
+                                >
+                                  <option value="active">Active</option>
+                                  <option value="inactive">Inactive</option>
+                                </select>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+                                  {Boolean(c.disabled) ? (
+                                    <span className="admin-pill-warn admin-pill">Inactive</span>
+                                  ) : (
+                                    <span className="admin-pill">Active</span>
+                                  )}
+                                  {c.contactId ? (
+                                    <button
+                                      type="button"
+                                      className="admin-btn admin-btn--ghost"
+                                      style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                                      onClick={async () => {
+                                        const nextDisabled = !Boolean(c.disabled)
+                                        try {
+                                          await adminFetch(`/api/admin/customers/contact/${encodeURIComponent(c.contactId)}`, {
+                                            method: 'PATCH',
+                                            body: JSON.stringify({ disabled: nextDisabled })
+                                          })
+                                          await refreshCustomers()
+                                          toast(nextDisabled ? 'Customer deactivated in Zoho' : 'Customer activated in Zoho', 'info')
+                                        } catch (e) {
+                                          toast(e instanceof Error ? e.message : 'Failed', 'error')
+                                        }
+                                      }}
+                                    >
+                                      {Boolean(c.disabled) ? 'Activate' : 'Deactivate'}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              )}
                             </td>
                             <td style={{ fontSize: '0.75rem' }}>{c.zohoContactId}</td>
                             <td>
                               <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                                 <IconEditButton
                                   label={`Edit customer ${c.fullName}`}
+                                  disabled={customerBulkEditMode}
                                   onClick={() => {
                                     const initialEmail = pickFirstCustomerEmail(
                                       c.lookupEmail,
@@ -1017,6 +1387,7 @@ export default function App() {
                                 {c.contactId ? (
                                   <IconDeleteButton
                                     label={`Delete customer ${c.fullName}`}
+                                    disabled={customerBulkEditMode}
                                     onClick={async () => {
                                       if (!confirm(`Delete customer "${c.fullName}" from Zoho?`)) return
                                       try {
@@ -1033,7 +1404,8 @@ export default function App() {
                               </div>
                             </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1044,7 +1416,10 @@ export default function App() {
                   className="admin-btn admin-btn--ghost"
                   type="button"
                   disabled={customersLoading || customersPage <= 1}
-                  onClick={() => setCustomersPage((p) => Math.max(1, p - 1))}
+                  onClick={() => {
+                    if (!guardCustomerBulkEditNavigation()) return
+                    setCustomersPage((p) => Math.max(1, p - 1))
+                  }}
                 >
                   Previous
                 </button>
@@ -1061,7 +1436,10 @@ export default function App() {
                   className="admin-btn admin-btn--ghost"
                   type="button"
                   disabled={customersLoading || !customersMeta.has_more}
-                  onClick={() => setCustomersPage((p) => p + 1)}
+                  onClick={() => {
+                    if (!guardCustomerBulkEditNavigation()) return
+                    setCustomersPage((p) => p + 1)
+                  }}
                 >
                   Next
                 </button>
@@ -1072,7 +1450,6 @@ export default function App() {
 
           {page === 'pricing-categories' ? (
             <>
-              <h2 style={{ marginTop: 0 }}>Customer category</h2>
               <p style={{ color: 'var(--admin-muted)' }}>
                 Create and edit discount tiers per customer category in Zoho Books. Assign a category to each customer
                 from the Customers page (category column).
@@ -1328,16 +1705,24 @@ export default function App() {
 
           {page === 'drivers' ? (
             <>
-              <h2 style={{ marginTop: 0 }}>Drivers</h2>
               <p style={{ color: 'var(--admin-muted)' }}>
                 Creates a Zoho Books contact plus delivery login for drivers.
               </p>
-              <div className="admin-form-row" style={{ justifyContent: 'flex-end' }}>
+              <div className="admin-form-row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+                <button
+                  type="button"
+                  className="admin-btn admin-btn--ghost admin-btn-inline"
+                  disabled={selectedDriversForDelete.length === 0 || driversRefreshing}
+                  onClick={() => void handleDeleteSelectedDrivers()}
+                >
+                  Delete selected ({selectedDriversForDelete.length})
+                </button>
                 <button type="button" className="admin-btn admin-btn-inline" onClick={() => setShowAddDriverModal(true)}>
                   Add
                 </button>
               </div>
-              <div className="admin-table-wrap">
+              <div className="admin-table-wrap admin-busy-host">
+                {driversRefreshing ? <AdminBusyOverlay label="Refreshing drivers…" /> : null}
                 <table className="admin-table">
                   <thead>
                     <tr>
@@ -1429,13 +1814,32 @@ export default function App() {
                             <IconDeleteButton
                             label="Delete"
                             onClick={async () => {
+                              const zid = String(d.zohoContactId || d.id || '').trim()
+                              if (!zid) {
+                                toast('Missing Zoho contact id for this driver', 'error')
+                                return
+                              }
                               if (!confirm(`Remove driver ${d.email}?`)) return
+                              const deletedEmail = d.email
                               try {
-                                await adminFetch(`/api/admin/drivers/${encodeURIComponent(d.email)}`, {
-                                  method: 'DELETE'
+                                const r = await adminFetch<{ message?: string }>(
+                                  `/api/admin/drivers/zoho/${encodeURIComponent(zid)}`,
+                                  { method: 'DELETE' }
+                                )
+                                setDrivers((prev) =>
+                                  prev.filter((row) => String(row.zohoContactId || row.id || '').trim() !== zid)
+                                )
+                                setSelectedDriverEmails((prev) => {
+                                  const next = { ...prev }
+                                  delete next[deletedEmail]
+                                  return next
                                 })
-                                await refreshDrivers()
+                                const list = await refreshDrivers({ delayMs: 250 })
+                                const totalPages = Math.max(1, Math.ceil(list.length / TABLE_PAGE_SIZE))
+                                setDriversPage((p) => Math.min(p, totalPages))
+                                toast(typeof r?.message === 'string' ? r.message : 'Driver removed')
                               } catch (e) {
+                                await refreshDrivers()
                                 toast(e instanceof Error ? e.message : 'Failed', 'error')
                               }
                             }}
@@ -1467,20 +1871,6 @@ export default function App() {
 
           {page === 'deliveries' ? (
             <>
-              <h2 style={{ marginTop: 0 }}>Orders & delivery</h2>
-              <p style={{ color: 'var(--admin-muted)', maxWidth: 720 }}>
-                Assign <strong>Zoho Books invoices</strong> to a driver below; the driver app shows those stops, accepts
-                them, updates status, and uploads a signed-invoice photo (attached to the invoice in Zoho). Sales orders
-                and legacy stops are listed further down. Line items should use Zoho <strong>item IDs</strong> from your
-                catalog so challans and stock sync work.
-              </p>
-
-              <h3 style={{ marginTop: 24, marginBottom: 8 }}>Invoices (Zoho Books)</h3>
-              <p style={{ color: 'var(--admin-muted)', fontSize: '0.875rem', maxWidth: 720 }}>
-                Pick a driver, then use <strong>Assign</strong> on a row to create a delivery assignment. The driver sees
-                it in the app, accepts, navigates, and submits proof of delivery. Track status and download proof files
-                under <strong>Assignments</strong> in the sidebar.
-              </p>
               <div className="admin-form-row" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.85rem', color: 'var(--admin-muted)' }}>
                   Driver for assignment

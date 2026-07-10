@@ -1,4 +1,4 @@
-package com.abhyati.deliverydriver;
+package com.abhyatifoodpak.app;
 
 import com.getcapacitor.BridgeActivity;
 

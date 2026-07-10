@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.platepro.customer',
+  appId: 'com.abhyatifoodpak.app',
   appName: 'Abhyati food',
   webDir: 'dist'
 };

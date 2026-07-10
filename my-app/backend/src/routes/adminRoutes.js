@@ -13,6 +13,7 @@ import {
   listDrivers,
   setDriverDisabled,
   setDriverDisabledByContactId,
+  deleteDriverRecordByContactId,
   updateDriverRecord
 } from '../services/driverStore.js'
 import {
@@ -55,6 +56,7 @@ import {
   mergeProductCategoryNameIntoItemCustomFields,
   newProductCategoryId,
   saveProductCategoriesFull,
+  hydrateItemsListRowsForProductCategoryField,
   withItemProductCategoryVirtual
 } from '../services/productCategoryZohoService.js'
 import { createAssignment, getAssignmentById, listAssignments } from '../services/deliveryAssignmentStore.js'
@@ -178,15 +180,18 @@ function mergeAdminItemUpdateWithZohoExisting(cleanBody, existingItem) {
   for (const k of Object.keys(out)) {
     if (out[k] === '') delete out[k]
   }
-  // Internal Zoho item name is read-only in admin; always send the current catalog name.
-  delete out.name
   if (!existingItem || typeof existingItem !== 'object') {
     if (out.unit == null || String(out.unit).trim() === '') out.unit = 'unit'
     return out
   }
   const ex = existingItem
-  if (ex.name != null && String(ex.name).trim() !== '') {
+  const requestedName = out.name != null ? String(out.name).trim() : ''
+  if (requestedName) {
+    out.name = requestedName
+  } else if (ex.name != null && String(ex.name).trim() !== '') {
     out.name = ex.name
+  } else {
+    delete out.name
   }
   const fillIfMissing = (key) => {
     const cur = out[key]
@@ -1165,6 +1170,43 @@ adminRoutes.put('/drivers/:email', async (req, res, next) => {
   }
 })
 
+adminRoutes.delete('/drivers/zoho/:contactId', async (req, res, next) => {
+  try {
+    const contactId = z.string().min(1).parse(req.params.contactId)
+    const email = await getDriverEmailByZohoContactId(contactId)
+    if (!email) {
+      const err = new Error('Driver not found')
+      err.statusCode = 404
+      throw err
+    }
+    const credRemoved = await deleteDriverRecordByContactId(contactId)
+    if (!credRemoved) {
+      const err = new Error('Driver not found')
+      err.statusCode = 404
+      throw err
+    }
+    let zohoResult
+    try {
+      zohoResult = await deleteOrDeactivateZohoContact(contactId)
+    } catch (e) {
+      zohoResult = { mode: 'credentials_removed', message: String(e?.message || e) }
+    }
+    appendAdminAudit({
+      action: 'admin_delete_driver',
+      meta: { email, zohoContactId: contactId, zohoResult }
+    })
+    const msg =
+      zohoResult.mode === 'deleted'
+        ? 'Driver removed from Zoho'
+        : zohoResult.mode === 'deactivated'
+          ? 'Driver app login removed; Zoho contact deactivated (linked to transactions)'
+          : 'Driver app login removed'
+    res.json({ message: msg, zoho: zohoResult })
+  } catch (error) {
+    next(error)
+  }
+})
+
 adminRoutes.delete('/drivers/:email', async (req, res, next) => {
   try {
     const { email } = emailParam.parse({ email: decodeURIComponent(req.params.email) })
@@ -1174,17 +1216,29 @@ adminRoutes.delete('/drivers/:email', async (req, res, next) => {
       err.statusCode = 404
       throw err
     }
+    const credRemoved = await deleteDriverRecordByContactId(driver.zohoContactId)
+    if (!credRemoved) {
+      const err = new Error('Driver not found')
+      err.statusCode = 404
+      throw err
+    }
     let zohoResult
     try {
       zohoResult = await deleteOrDeactivateZohoContact(driver.zohoContactId)
     } catch (e) {
-      zohoResult = { mode: 'error', message: String(e?.message) }
+      zohoResult = { mode: 'credentials_removed', message: String(e?.message || e) }
     }
     appendAdminAudit({
       action: 'admin_delete_driver',
       meta: { email, zohoContactId: driver.zohoContactId, zohoResult }
     })
-    res.json({ message: 'Driver removed from Zoho', zoho: zohoResult })
+    const msg =
+      zohoResult.mode === 'deleted'
+        ? 'Driver removed from Zoho'
+        : zohoResult.mode === 'deactivated'
+          ? 'Driver app login removed; Zoho contact deactivated (linked to transactions)'
+          : 'Driver app login removed'
+    res.json({ message: msg, zoho: zohoResult })
   } catch (error) {
     next(error)
   }
@@ -1337,6 +1391,15 @@ adminRoutes.get('/items', async (req, res, next) => {
   try {
     const query = z.object({}).passthrough().parse(req.query)
     let data = await listModule('/items', query)
+    if (data?.items && Array.isArray(data.items)) {
+      const needsHydration = getZohoItemCustomerDisplayFieldId() || isProductCategoryConfigured()
+      if (needsHydration) {
+        const { items: hydrated } = await hydrateItemsListRowsForProductCategoryField(data.items, {
+          concurrency: 12
+        })
+        data = { ...data, items: hydrated }
+      }
+    }
     if (getZohoItemCustomerDisplayFieldId() && data?.items && Array.isArray(data.items)) {
       data = { ...data, items: data.items.map((row) => withCustomerProductNameVirtual(row)) }
     }

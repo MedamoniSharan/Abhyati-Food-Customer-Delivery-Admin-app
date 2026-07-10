@@ -1,7 +1,7 @@
 {
   "name": "my-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,10 @@
     "backend:dev": "npm --prefix backend run dev",
     "backend:start": "npm --prefix backend run start",
     "admin:dev": "npm --prefix admin-dashboard run dev",
-    "admin:build": "npm --prefix admin-dashboard run build"
+    "admin:build": "npm --prefix admin-dashboard run build",
+    "cap:sync": "npm run build && npx cap sync android",
+    "android:apk": "VITE_API_BASE_URL=https://abhyati-food-customer-delivery-admin-app.onrender.com npm run build && npx cap sync android && cd android && ./gradlew assembleDebug",
+    "android:aab": "VITE_API_BASE_URL=https://abhyati-food-customer-delivery-admin-app.onrender.com npm run build && npx cap sync android && cd android && ./gradlew bundleRelease && mkdir -p ../../releases && cp app/build/outputs/bundle/release/Abhyati-food-release.aab ../../releases/"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",

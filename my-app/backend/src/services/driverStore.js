@@ -147,7 +147,17 @@ export async function setDriverDisabledByContactId(contactId, disabled) {
 export async function deleteDriverRecord(email) {
   const contact = await getDriverContactForApp(normalizeEmail(email))
   if (!contact?.contact_id) return false
-  await updateModule('/contacts', contact.contact_id, { contact_id: contact.contact_id, notes: '' })
+  return deleteDriverRecordByContactId(contact.contact_id)
+}
+
+/** Remove driver app-login credentials from Zoho notes (stops listing in Deliverers). */
+export async function deleteDriverRecordByContactId(contactId) {
+  const id = String(contactId ?? '').trim()
+  if (!id) return false
+  const data = await getModuleById('/contacts', id)
+  const c = data?.contact || data
+  if (!c?.contact_id || parseDriverPasswordHashFromNotes(c.notes) == null) return false
+  await updateModule('/contacts', id, { contact_id: id, notes: '' })
   return true
 }
 

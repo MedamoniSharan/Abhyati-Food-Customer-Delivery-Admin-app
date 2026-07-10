@@ -1,14 +1,16 @@
 {
   "name": "abhyati-delivery-driver",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "cap:sync": "npm run build && npx cap sync"
+    "cap:sync": "npm run build && npx cap sync",
+    "android:apk": "VITE_API_BASE_URL=https://abhyati-food-customer-delivery-admin-app.onrender.com npm run build && npx cap sync android && cd android && ./gradlew assembleDebug",
+    "android:aab": "VITE_API_BASE_URL=https://abhyati-food-customer-delivery-admin-app.onrender.com npm run build && npx cap sync android && cd android && ./gradlew bundleRelease && mkdir -p ../../releases && cp app/build/outputs/bundle/release/Abhyati-delivery-release.aab ../../releases/"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",
