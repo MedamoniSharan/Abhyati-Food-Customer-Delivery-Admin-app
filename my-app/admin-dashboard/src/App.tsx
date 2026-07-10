@@ -317,6 +317,8 @@ export default function App() {
   const [loginLoading, setLoginLoading] = useState(false)
   const [page, setPage] = useState<Page>('products')
   const [loadErr, setLoadErr] = useState('')
+  const [zohoStatus, setZohoStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
+  const [zohoStatusDetail, setZohoStatusDetail] = useState('')
   const [pageDataLoading, setPageDataLoading] = useState(false)
   const [customers, setCustomers] = useState<AdminCustomerRow[]>([])
   const [drivers, setDrivers] = useState<
@@ -606,10 +608,41 @@ export default function App() {
       setTokenState(null)
       setPageDataLoading(false)
       setLoadErr('')
+      setZohoStatus('idle')
+      setZohoStatusDetail('')
     }
     window.addEventListener(ADMIN_SESSION_LOST_EVENT, onSessionLost)
     return () => window.removeEventListener(ADMIN_SESSION_LOST_EVENT, onSessionLost)
   }, [])
+
+  const refreshZohoStatus = useCallback(async () => {
+    if (!token) {
+      setZohoStatus('idle')
+      setZohoStatusDetail('')
+      return
+    }
+    setZohoStatus('checking')
+    try {
+      const r = await adminFetch<{ connected?: boolean; message?: string }>('/api/admin/zoho-status')
+      if (r.connected) {
+        setZohoStatus('ok')
+        setZohoStatusDetail(typeof r.message === 'string' ? r.message : 'Zoho Books connected')
+      } else {
+        setZohoStatus('error')
+        setZohoStatusDetail(typeof r.message === 'string' ? r.message : 'Zoho Books not connected')
+      }
+    } catch (e) {
+      setZohoStatus('error')
+      setZohoStatusDetail(e instanceof Error ? e.message : 'Zoho Books check failed')
+    }
+  }, [token])
+
+  useEffect(() => {
+    if (!token) return
+    void refreshZohoStatus()
+    const id = window.setInterval(() => void refreshZohoStatus(), 120_000)
+    return () => window.clearInterval(id)
+  }, [token, refreshZohoStatus])
 
   const customerRows = useMemo((): CustomerTableRow[] => {
     return customers.map((c, index) => {
@@ -1052,7 +1085,29 @@ export default function App() {
               assignments: 'Assignments'
             }[page]}
           </strong>
-          <span style={{ color: 'var(--admin-muted)', fontSize: '0.875rem' }}>Zoho Books connected</span>
+          <span
+            style={{
+              color:
+                zohoStatus === 'ok'
+                  ? '#15803d'
+                  : zohoStatus === 'error'
+                    ? '#b91c1c'
+                    : 'var(--admin-muted)',
+              fontSize: '0.875rem',
+              maxWidth: 420,
+              textAlign: 'right',
+              lineHeight: 1.35
+            }}
+            title={zohoStatusDetail || undefined}
+          >
+            {zohoStatus === 'checking'
+              ? 'Checking Zoho Books…'
+              : zohoStatus === 'ok'
+                ? zohoStatusDetail || 'Zoho Books connected'
+                : zohoStatus === 'error'
+                  ? zohoStatusDetail || 'Zoho Books not connected'
+                  : 'Sign in to check Zoho'}
+          </span>
         </header>
         <main className="admin-content">
           {loadErr ? <div className="admin-error">{loadErr}</div> : null}

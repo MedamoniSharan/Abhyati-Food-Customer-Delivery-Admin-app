@@ -32,6 +32,7 @@ import {
   findCustomerByEmail,
   getInvoiceAttachment,
   getModuleById,
+  getOrganizationId,
   listContactsDetailBySearchText,
   listModule,
   markZohoItemInactive,
@@ -385,6 +386,21 @@ adminRoutes.post('/login', (req, res, next) => {
 })
 
 adminRoutes.use(requireAdmin)
+
+adminRoutes.get('/zoho-status', async (_req, res, next) => {
+  try {
+    const orgId = await getOrganizationId()
+    const probe = await listModule('/items', { per_page: 1, page: 1 })
+    const ok = Number(probe?.code) === 0 || Array.isArray(probe?.items)
+    res.json({
+      connected: ok,
+      organizationId: String(orgId || ''),
+      message: ok ? 'Zoho Books connected' : 'Zoho Books returned an unexpected response'
+    })
+  } catch (error) {
+    next(error)
+  }
+})
 
 adminRoutes.get('/overview', async (_req, res, next) => {
   try {

@@ -58,13 +58,23 @@ export function errorHandler(error, req, res, _next) {
       typeof zohoBody === 'object' && zohoBody != null && typeof zohoBody.message === 'string'
         ? zohoBody.message
         : ''
+    const zohoErrDesc =
+      typeof zohoBody === 'object' && zohoBody != null && typeof zohoBody.error_description === 'string'
+        ? zohoBody.error_description
+        : ''
+    const isRateLimited =
+      /too many requests/i.test(zohoMsg) ||
+      /too many requests/i.test(zohoErrDesc) ||
+      (typeof zohoBody === 'object' && zohoBody != null && String(zohoBody.error || '') === 'Access Denied')
     const needsAuthHint =
-      rawStatus === 401 ||
-      (typeof zohoBody === 'object' && zohoBody != null && Number(zohoBody.code) === 57) ||
-      /not authorized/i.test(zohoMsg)
+      !isRateLimited &&
+      (rawStatus === 401 ||
+        (typeof zohoBody === 'object' && zohoBody != null && Number(zohoBody.code) === 57) ||
+        /not authorized/i.test(zohoMsg))
     return res.status(status).json({
-      message: 'Zoho API request failed',
+      message: isRateLimited ? 'Zoho API rate limit — try again in a minute' : 'Zoho API request failed',
       zoho: zohoBody || error.message,
+      ...(isRateLimited ? { zoho_rate_limit: true } : {}),
       ...(needsAuthHint
         ? { zoho_auth_hint: 'Check ZOHO_REFRESH_TOKEN and OAuth scopes (Books full access).' }
         : {})
