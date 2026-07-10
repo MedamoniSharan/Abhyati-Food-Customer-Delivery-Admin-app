@@ -1,4 +1,5 @@
 import { DeliveryGoogleMap } from '../../components/DeliveryGoogleMap'
+import { NotificationsBell } from '../../contexts/NotificationsContext'
 import type { DeliveryStop } from '../../services/deliveryBackendApi'
 import { formatInr } from '../../utils/currency'
 
@@ -40,27 +41,7 @@ export function DeliveryDashboardScreen({
             <span className="material-symbols-outlined">menu</span>
           </button>
           <h1>Dashboard</h1>
-          <button
-            type="button"
-            className="dd-icon-btn"
-            aria-label="Notifications"
-            style={{ position: 'relative' }}
-            onClick={() => onNotify('No new alerts')}
-          >
-            <span className="material-symbols-outlined">notifications</span>
-            <span
-              style={{
-                position: 'absolute',
-                top: 6,
-                right: 6,
-                width: 9,
-                height: 9,
-                borderRadius: 999,
-                background: 'var(--dd-accent)',
-                border: '2px solid #fff',
-              }}
-            />
-          </button>
+          <NotificationsBell />
         </div>
       </header>
 

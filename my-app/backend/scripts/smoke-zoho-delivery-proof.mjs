@@ -155,10 +155,19 @@ async function main() {
   const assignmentId = assignRes.assignment?.id
   if (!assignmentId) throw new Error('No assignment id')
 
-  console.log('6) Driver accept + upload proof (Zoho only)')
   const drvTok = (
     await j('/api/delivery/login', { method: 'POST', body: JSON.stringify({ email: drvEmail, password: drvPass }) })
   ).token
+  const driverAssignmentsAfterAssign = await j('/api/delivery/assignments', {
+    headers: { Authorization: `Bearer ${drvTok}` }
+  })
+  const pendingForDriver = (driverAssignmentsAfterAssign.assignments || []).find(
+    (row) => String(row.id) === String(assignmentId)
+  )
+  if (!pendingForDriver) throw new Error('Driver cannot see assigned order after admin assign')
+  console.log('   driver sees assignment, status:', pendingForDriver.status)
+
+  console.log('6) Driver accept + upload proof (Zoho only)')
   await j(`/api/delivery/assignments/${encodeURIComponent(assignmentId)}/accept`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${drvTok}` }
@@ -203,7 +212,30 @@ async function main() {
   )
   console.log('   customer photo bytes', custPhoto.size)
 
-  console.log('\nPASS — delivery proof stored in Zoho Books only (no new local proof files)')
+  console.log('9) Admin assignment list shows delivered')
+  const adminAssignments = await j('/api/admin/delivery-assignments', {
+    headers: { Authorization: `Bearer ${adminTok}` }
+  })
+  const adminRow = (adminAssignments.assignments || []).find((row) => String(row.id) === String(assignmentId))
+  if (!adminRow) throw new Error('Assignment missing from admin delivery-assignments list')
+  if (String(adminRow.status).toLowerCase() !== 'delivered') {
+    throw new Error(`Admin assignment status expected delivered, got ${adminRow.status}`)
+  }
+  console.log('   admin assignment status:', adminRow.status, 'driver:', adminRow.driverEmail || adminRow.driver_email)
+
+  console.log('10) Customer orders list shows Delivered')
+  const customerOrders = await j('/api/customer/orders', {
+    headers: { Authorization: `Bearer ${custProofTok}` }
+  })
+  const customerOrder = (customerOrders.orders || []).find((row) => String(row.invoiceId || row.id) === invoiceId)
+  if (!customerOrder) throw new Error('Order missing from customer orders list')
+  if (customerOrder.status !== 'Delivered') {
+    throw new Error(`Customer order status expected Delivered, got ${customerOrder.status}`)
+  }
+  if (!customerOrder.proofAvailable) throw new Error('Customer order proofAvailable should be true')
+  console.log('   customer order status:', customerOrder.status, 'proofAvailable:', customerOrder.proofAvailable)
+
+  console.log('\nPASS — full delivery flow: order → assign → accept → proof → admin + customer updated')
 }
 
 main().catch((e) => {

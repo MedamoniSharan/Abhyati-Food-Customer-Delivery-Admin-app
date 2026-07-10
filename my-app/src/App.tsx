@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { NotificationsProvider } from './contexts/NotificationsContext'
 import { BottomNav } from './components/BottomNav'
+import { PullToRefresh } from './components/PullToRefresh'
 import { useToast } from './contexts/ToastContext'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { AuthScreen } from './screens/AuthScreen'
@@ -118,6 +120,49 @@ function App() {
     setOrderHistory(await getBackendOrders())
   }, [])
 
+  const handlePullRefresh = useCallback(async () => {
+    const token = readAuthToken()
+    if (!token) return
+    try {
+      const user = await fetchAuthMe(token)
+      if (user) {
+        writeSignedIn(user, token)
+        setSessionUser(user)
+      }
+      const { configured, categories } = await fetchCustomerProductCategories()
+      if (configured && categories.length > 0) {
+        setServerCategoryNames(
+          categories.map((c) => String(c.name || '').trim()).filter((n) => n.length > 0)
+        )
+      } else {
+        setServerCategoryNames([])
+      }
+      catalogFetchLock.current = true
+      setLoadingCatalog(true)
+      try {
+        const catOpt = selectedCategory === 'All Items' ? undefined : selectedCategory
+        const { products: firstPage, hasMore } = await fetchZohoItemsPage(1, 20, { categoryName: catOpt })
+        setCatalogProducts(firstPage)
+        setHasMoreCatalogItems(hasMore)
+        setNextItemsPage(2)
+        if (firstPage.length > 0) {
+          setSelectedProduct((current) =>
+            current && firstPage.some((p) => p.id === current.id) ? current : firstPage[0]
+          )
+        } else {
+          setSelectedProduct(null)
+        }
+      } finally {
+        catalogFetchLock.current = false
+        setLoadingCatalog(false)
+      }
+      await refreshOrderHistory()
+      showToast('Refreshed', { variant: 'success' })
+    } catch {
+      showToast('Could not refresh. Try again.', { variant: 'error' })
+    }
+  }, [refreshOrderHistory, selectedCategory, showToast])
+
   const mergeDedupeProducts = useCallback((existing: Product[], incoming: Product[]) => {
     const seen = new Set(existing.map((p) => p.id))
     const out = [...existing]
@@ -222,6 +267,9 @@ function App() {
   }, [hasMoreCatalogItems, loadCatalogPage])
 
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.quantity, 0), [cartItems])
+
+  const pullToRefreshEnabled =
+    screen !== 'product' && !(screen === 'orders' && selectedOrder != null)
 
   const visibleProducts = useMemo(() => {
     const catalogHasZohoItems = catalogProducts.some((p) => p.zohoItemId)
@@ -422,7 +470,6 @@ function App() {
           onQueryChange={setSearchQuery}
           onOpenProduct={openProduct}
           onAddToCart={(product) => addToCart(product, 1)}
-          onNotify={(msg) => showToast(msg, { variant: 'info' })}
           isMenuOpen={isMenuOpen}
           onToggleMenu={() => setIsMenuOpen((prev) => !prev)}
           onCloseMenu={() => setIsMenuOpen(false)}
@@ -557,10 +604,14 @@ function App() {
           }}
         />
       ) : (
-        <>
-          <div className="phone-frame">{renderScreen()}</div>
+        <NotificationsProvider enabled={isAuthenticated}>
+          <div className="phone-frame">
+            <PullToRefresh onRefresh={handlePullRefresh} disabled={!pullToRefreshEnabled}>
+              {renderScreen()}
+            </PullToRefresh>
+          </div>
           <BottomNav screen={screen} cartCount={cartCount} onChange={setScreen} />
-        </>
+        </NotificationsProvider>
       )}
     </div>
   )

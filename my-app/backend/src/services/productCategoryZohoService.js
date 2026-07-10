@@ -25,14 +25,30 @@ function zohoCfRowId(row) {
   return String(row.customfield_id ?? row.customfieldid ?? '').trim()
 }
 
+/** Zoho rejects contact PUT when echoed `value_formatted` on other fields exceeds 100 chars. */
+function zohoContactCustomFieldUpdateRow(row) {
+  if (!row || typeof row !== 'object') return null
+  const id = zohoCfRowId(row)
+  if (!id || row.value == null) return null
+  return { customfield_id: id, value: String(row.value) }
+}
+
 function mergeContactCustomField(contact, fieldId, value) {
   const id = String(fieldId)
-  const cfs = Array.isArray(contact?.custom_fields) ? contact.custom_fields.map((x) => ({ ...x })) : []
-  const idx = cfs.findIndex((x) => zohoCfRowId(x) === id)
-  const row = { customfield_id: id, value }
-  if (idx >= 0) cfs[idx] = row
-  else cfs.push(row)
-  return cfs
+  const cfs = Array.isArray(contact?.custom_fields) ? contact.custom_fields : []
+  const out = []
+  const seen = new Set()
+  for (const row of cfs) {
+    const rid = zohoCfRowId(row)
+    if (!rid || rid === id || seen.has(rid)) continue
+    const slim = zohoContactCustomFieldUpdateRow(row)
+    if (slim) {
+      out.push(slim)
+      seen.add(rid)
+    }
+  }
+  out.push({ customfield_id: id, value })
+  return out
 }
 
 export function isProductCategoryConfigured() {

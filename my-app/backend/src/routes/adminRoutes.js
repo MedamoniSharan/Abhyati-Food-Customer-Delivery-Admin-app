@@ -60,6 +60,12 @@ import {
   withItemProductCategoryVirtual
 } from '../services/productCategoryZohoService.js'
 import { createAssignment, getAssignmentById, listAssignments } from '../services/deliveryAssignmentStore.js'
+import {
+  notifyCustomerDriverAssigned,
+  notifyCustomerOrderDelivered,
+  notifyCustomerOrderShipped,
+  notifyDriverAssignment
+} from '../services/notificationService.js'
 import { upsertInvoiceAssignmentNote } from '../services/zohoDeliveryAssignmentNotes.js'
 import { paymentsByInvoiceIdMap } from '../services/paymentRecordStore.js'
 import {
@@ -1055,6 +1061,26 @@ adminRoutes.post('/delivery-assignments', async (req, res, next) => {
       await upsertInvoiceAssignmentNote(assignment.invoiceId, assignment)
     } catch {
       /* assignment still valid in app store; Zoho note is best-effort sync */
+    }
+    try {
+      notifyDriverAssignment({
+        driverEmail: driver.email,
+        assignmentId: assignment.id,
+        invoiceId: assignment.invoiceId,
+        invoiceNumber: assignment.invoiceNumber,
+        customerName: assignment.customerName,
+        address: assignment.address
+      })
+      if (assignment.customerEmail) {
+        notifyCustomerDriverAssigned({
+          customerEmail: assignment.customerEmail,
+          invoiceId: assignment.invoiceId,
+          invoiceNumber: assignment.invoiceNumber,
+          driverName: driver.fullName
+        })
+      }
+    } catch {
+      /* non-fatal */
     }
     appendAdminAudit({ action: 'admin_assign_invoice', meta: { driver: driver.email, invoice: input.invoice_id } })
     res.status(201).json({ message: 'Invoice assigned to driver', assignment })

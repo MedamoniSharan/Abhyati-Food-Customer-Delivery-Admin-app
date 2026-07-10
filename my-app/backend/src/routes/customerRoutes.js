@@ -21,6 +21,13 @@ import {
 } from '../services/orderCheckoutService.js'
 import { compareOrderDateDesc, mapInvoiceToOrder } from '../services/orderMapping.js'
 import { hydrateInvoicesWithLineItems } from '../services/orderInvoiceHydrate.js'
+import { notifyCustomerOrderPlaced } from '../services/notificationService.js'
+import {
+  countUnreadForRecipient,
+  listNotificationsForRecipient,
+  markAllNotificationsRead,
+  markNotificationRead
+} from '../services/notificationStore.js'
 import {
   enrichCustomerItemsResponse,
   enrichCustomerSingleItemResponse,
@@ -223,6 +230,17 @@ customerRoutes.post('/orders', async (req, res, next) => {
       ).trim() || 'app-order'
     const inventory_adjustments = await adjustInventoryForCheckout(resolvedLines, refLabel)
 
+    try {
+      notifyCustomerOrderPlaced({
+        customerEmail: customer.email,
+        invoiceId: invoice?.invoice_id,
+        invoiceNumber: invoice?.invoice_number || invoice?.reference_number || body.reference_number,
+        amountInr: invoice?.total
+      })
+    } catch {
+      /* non-fatal */
+    }
+
     res.status(201).json({
       message: 'Order created',
       salesorder,
@@ -393,6 +411,42 @@ customerRoutes.get('/orders/:id/proof/summary', async (req, res, next) => {
         total: Number(invoice?.total) || Number(assignment.amount) || 0
       }
     })
+  } catch (error) {
+    next(error)
+  }
+})
+
+customerRoutes.get('/notifications', async (req, res, next) => {
+  try {
+    const notifications = listNotificationsForRecipient('customer', req.customer.email)
+    res.json({
+      notifications,
+      unreadCount: countUnreadForRecipient('customer', req.customer.email)
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+customerRoutes.post('/notifications/read-all', async (req, res, next) => {
+  try {
+    const updated = markAllNotificationsRead('customer', req.customer.email)
+    res.json({ message: 'All notifications marked read', updated })
+  } catch (error) {
+    next(error)
+  }
+})
+
+customerRoutes.post('/notifications/:id/read', async (req, res, next) => {
+  try {
+    const { id } = idParamSchema.parse(req.params)
+    const row = markNotificationRead(id, 'customer', req.customer.email)
+    if (!row) {
+      const err = new Error('Notification not found')
+      err.statusCode = 404
+      throw err
+    }
+    res.json({ notification: row })
   } catch (error) {
     next(error)
   }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { NotificationsProvider } from './contexts/NotificationsContext'
 import { useToast } from './contexts/ToastContext'
 import { DeliveryDriverApp } from './screens/delivery/DeliveryDriverApp'
 import { DriverAuthScreen } from './screens/DriverAuthScreen'
@@ -52,20 +53,22 @@ function App() {
           }}
         />
       ) : (
-        <DeliveryDriverApp
-          user={sessionUser}
-          onSessionUpdate={(user, token) => {
-            writeSignedIn(user, token)
-            setSessionUser(user)
-          }}
-          onLogout={() => {
-            clearSignedIn()
-            setIsAuthenticated(false)
-            setSessionUser(null)
-            showToast('Logged out successfully', { variant: 'success' })
-          }}
-          onNotify={(msg) => showToast(msg, { variant: 'info' })}
-        />
+        <NotificationsProvider enabled={isAuthenticated}>
+          <DeliveryDriverApp
+            user={sessionUser}
+            onSessionUpdate={(user, token) => {
+              writeSignedIn(user, token)
+              setSessionUser(user)
+            }}
+            onLogout={() => {
+              clearSignedIn()
+              setIsAuthenticated(false)
+              setSessionUser(null)
+              showToast('Logged out successfully', { variant: 'success' })
+            }}
+            onNotify={(msg) => showToast(msg, { variant: 'info' })}
+          />
+        </NotificationsProvider>
       )}
     </div>
   )

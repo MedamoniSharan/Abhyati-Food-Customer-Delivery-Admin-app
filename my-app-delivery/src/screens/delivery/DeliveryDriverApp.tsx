@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthUser } from '../../services/authApi'
+import { PullToRefresh } from '../../components/PullToRefresh'
 import { DeliveryGoogleMap } from '../../components/DeliveryGoogleMap'
 import {
   acceptDeliveryStop,
@@ -68,6 +69,16 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
       if (!quiet) setLoadingStops(false)
     }
   }
+
+  const handlePullRefresh = useCallback(async () => {
+    try {
+      const data = await getDeliveryStops()
+      setStops(data)
+      onNotify('Refreshed')
+    } catch {
+      onNotify('Could not load deliveries')
+    }
+  }, [onNotify])
 
   function openProofForStop(stopId: string) {
     const stop = stops.find((s) => s.id === stopId)
@@ -365,6 +376,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
   return (
     <div className="driver-app">
       <div className="driver-phone-frame">
+        <PullToRefresh onRefresh={handlePullRefresh} disabled={scannerOpen || Boolean(routeMapQuery)}>
         {tab === 'dashboard' ? (
           <DeliveryDashboardScreen
             loading={loadingStops}
@@ -421,8 +433,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
               setTab('dashboard')
             }}
             onViewMap={(hint) => openRouteMap(hint)}
-            onNotify={onNotify}
-            onRefresh={() => refreshStops()}
+            onRefresh={() => void refreshStops()}
           />
         ) : null}
         {tab === 'history' ? (
@@ -475,6 +486,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
             </main>
           </>
         ) : null}
+        </PullToRefresh>
       </div>
       <DeliveryBottomNav active={tab} onChange={handleTabChange} onScan={openScanner} />
 

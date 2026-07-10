@@ -24,7 +24,6 @@ type Props = {
   onBackToDashboard: () => void
   /** Optional maps destination; falls back in parent when empty */
   onViewMap: (mapsQueryHint?: string) => void
-  onNotify: (message: string) => void
   onRefresh?: () => void | Promise<void>
 }
 
@@ -42,7 +41,6 @@ export function AssignedDeliveriesScreen({
   acceptingId,
   onBackToDashboard,
   onViewMap,
-  onNotify,
   onRefresh,
 }: Props) {
   const [selectedDate, setSelectedDate] = useState(() => normalizeCalendarDate(new Date()))

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { NotificationsBell } from '../contexts/NotificationsContext'
 import type { Product } from '../types/app'
 import { CatalogLoader } from '../components/CatalogLoader'
 import { ProductCard } from '../components/ProductCard'
@@ -14,7 +15,6 @@ type Props = {
   onQueryChange: (value: string) => void
   onOpenProduct: (product: Product) => void
   onAddToCart: (product: Product) => void
-  onNotify: (message: string) => void
   isMenuOpen: boolean
   onToggleMenu: () => void
   onCloseMenu: () => void
@@ -35,7 +35,6 @@ export function HomeScreen({
   onQueryChange,
   onOpenProduct,
   onAddToCart,
-  onNotify,
   isMenuOpen,
   onToggleMenu,
   onCloseMenu,
@@ -89,13 +88,7 @@ export function HomeScreen({
             )}
           </div>
           <div className="header-actions">
-            <button
-              type="button"
-              className="icon-btn icon-btn-dark with-dot"
-              onClick={() => onNotify('No new notifications')}
-            >
-              <span className="material-symbols-outlined">notifications_none</span>
-            </button>
+            <NotificationsBell dark />
           </div>
         </div>
         <div className="hero-copy">

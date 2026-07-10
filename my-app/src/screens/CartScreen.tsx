@@ -102,12 +102,32 @@ export function CartScreen({
           </div>
           <button
             type="button"
-            className="btn btn-accent"
+            className={`btn btn-accent${checkoutBusy ? ' btn--loading' : ''}`}
             disabled={checkoutBusy}
             onClick={() => onCheckout(paymentMode)}
+            aria-busy={checkoutBusy}
           >
-            {checkoutBusy ? 'Processing…' : paymentMode === 'pay_now' ? 'Pay & place order' : 'Place order'}
+            {checkoutBusy ? (
+              <span className="btn-loading-content">
+                <span className="btn-spinner btn-spinner--light" aria-hidden />
+                Processing…
+              </span>
+            ) : paymentMode === 'pay_now' ? (
+              'Pay & place order'
+            ) : (
+              'Place order'
+            )}
           </button>
+        </div>
+      ) : null}
+
+      {checkoutBusy ? (
+        <div className="checkout-busy-overlay" role="status" aria-live="polite" aria-busy="true">
+          <div className="checkout-busy-card">
+            <span className="checkout-busy-spinner" aria-hidden />
+            <p className="checkout-busy-title">Processing your order</p>
+            <p className="checkout-busy-hint">Please wait while we confirm checkout…</p>
+          </div>
         </div>
       ) : null}
     </>

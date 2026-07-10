@@ -9,6 +9,7 @@ import {
   resolveCustomerContactForCheckout
 } from '../services/orderCheckoutService.js'
 import { mapInvoiceToOrder } from '../services/orderMapping.js'
+import { notifyCustomerOrderPlaced } from '../services/notificationService.js'
 import {
   createPendingPaymentRecord,
   getPaymentRecordByRazorpayOrderId,
@@ -192,6 +193,17 @@ paymentRoutes.post('/razorpay/verify', async (req, res, next) => {
     })
 
     const order = invoice ? mapInvoiceToOrder(invoice, null) : null
+
+    try {
+      notifyCustomerOrderPlaced({
+        customerEmail: req.customer.email,
+        invoiceId: invoice?.invoice_id,
+        invoiceNumber: invoiceNumber,
+        amountInr
+      })
+    } catch {
+      /* non-fatal */
+    }
 
     res.status(201).json({
       message: zohoPaymentError

@@ -16,6 +16,16 @@ import { resolveAssignmentsForDriver } from '../services/deliveryAssignmentResol
 import { upsertInvoiceAssignmentNote } from '../services/zohoDeliveryAssignmentNotes.js'
 import { signDriverToken } from '../services/jwtService.js'
 import { uploadFullDeliveryProofToZoho } from '../services/zohoDeliveryProofService.js'
+import {
+  notifyCustomerOrderDelivered,
+  notifyCustomerOrderShipped
+} from '../services/notificationService.js'
+import {
+  countUnreadForRecipient,
+  listNotificationsForRecipient,
+  markAllNotificationsRead,
+  markNotificationRead
+} from '../services/notificationStore.js'
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -160,6 +170,18 @@ deliveryAuthRoutes.post('/assignments/:id/accept', async (req, res, next) => {
     } catch {
       /* keep local assignment even if Zoho sync fails */
     }
+    try {
+      if (updated.customerEmail) {
+        notifyCustomerOrderShipped({
+          customerEmail: updated.customerEmail,
+          invoiceId: updated.invoiceId,
+          invoiceNumber: updated.invoiceNumber,
+          driverName: updated.driverName
+        })
+      }
+    } catch {
+      /* non-fatal */
+    }
     res.json({ message: 'Assignment accepted', assignment: updated })
   } catch (error) {
     next(error)
@@ -269,7 +291,54 @@ deliveryAuthRoutes.post('/assignments/:id/proof', proofUpload, async (req, res, 
       action: 'driver_uploaded_invoice_proof',
       meta: { assignmentId: id, invoiceId: row.invoiceId, driverEmail: req.driver.email }
     })
+    try {
+      if (updated.customerEmail) {
+        notifyCustomerOrderDelivered({
+          customerEmail: updated.customerEmail,
+          invoiceId: updated.invoiceId,
+          invoiceNumber: updated.invoiceNumber
+        })
+      }
+    } catch {
+      /* non-fatal */
+    }
     res.json({ message: 'Proof uploaded to Zoho invoice', assignment: updated })
+  } catch (error) {
+    next(error)
+  }
+})
+
+deliveryAuthRoutes.get('/notifications', async (req, res, next) => {
+  try {
+    const notifications = listNotificationsForRecipient('driver', req.driver.email)
+    res.json({
+      notifications,
+      unreadCount: countUnreadForRecipient('driver', req.driver.email)
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+deliveryAuthRoutes.post('/notifications/read-all', async (req, res, next) => {
+  try {
+    const updated = markAllNotificationsRead('driver', req.driver.email)
+    res.json({ message: 'All notifications marked read', updated })
+  } catch (error) {
+    next(error)
+  }
+})
+
+deliveryAuthRoutes.post('/notifications/:id/read', async (req, res, next) => {
+  try {
+    const id = z.string().min(1).parse(req.params.id)
+    const row = markNotificationRead(id, 'driver', req.driver.email)
+    if (!row) {
+      const err = new Error('Notification not found')
+      err.statusCode = 404
+      throw err
+    }
+    res.json({ notification: row })
   } catch (error) {
     next(error)
   }
