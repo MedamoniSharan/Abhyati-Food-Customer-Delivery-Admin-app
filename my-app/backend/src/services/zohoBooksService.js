@@ -1,18 +1,21 @@
 import axios from 'axios'
 import { env } from '../config/env.js'
 import { getZohoAccessToken } from './zohoAuthService.js'
+import { withZohoRetry, zohoAxios } from './zohoRateLimit.js'
 
 async function request(method, path, { params, data } = {}) {
   const accessToken = await getZohoAccessToken()
   const headers = { Authorization: `Zoho-oauthtoken ${accessToken}` }
 
-  const response = await axios({
-    method,
-    url: `${env.ZOHO_BOOKS_BASE_URL}${path}`,
-    headers,
-    params,
-    data
-  })
+  const response = await withZohoRetry(() =>
+    axios({
+      method,
+      url: `${env.ZOHO_BOOKS_BASE_URL}${path}`,
+      headers,
+      params,
+      data
+    })
+  )
 
   const body = response.data
   // Zoho Books uses HTTP 2xx with a JSON `code` field: 0 = success, non-zero = error (see API "Response").
@@ -274,7 +277,7 @@ export async function uploadInvoiceAttachment(invoiceId, { buffer, mimetype, ori
   const blob = new Blob([buffer], { type: mimetype || 'application/octet-stream' })
   form.append('attachment', blob, originalname || 'proof.jpg')
 
-  const response = await axios({
+  const response = await zohoAxios({
     method: 'post',
     url: `${env.ZOHO_BOOKS_BASE_URL}/invoices/${encodeURIComponent(invoiceId)}/attachment`,
     headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
@@ -287,7 +290,7 @@ export async function uploadInvoiceAttachment(invoiceId, { buffer, mimetype, ori
 export async function getInvoiceAttachment(invoiceId) {
   const organizationId = await getOrganizationId()
   const accessToken = await getZohoAccessToken()
-  const response = await axios({
+  const response = await zohoAxios({
     method: 'get',
     url: `${env.ZOHO_BOOKS_BASE_URL}/invoices/${encodeURIComponent(invoiceId)}/attachment`,
     headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },

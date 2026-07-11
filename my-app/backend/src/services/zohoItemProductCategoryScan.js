@@ -17,7 +17,7 @@ export async function scanAllItemsProductCategoryCoverage({
   maxPages = 80,
   perPage = 200,
   searchText,
-  hydrateConcurrency = 14
+  hydrateConcurrency = 4
 } = {}) {
   if (!isProductCategoryConfigured()) {
     return {

@@ -1,5 +1,5 @@
 import { getApiBaseCandidates, logApiCandidatesOnce } from '../config/api'
-import { readDriverToken } from '../utils/authSession'
+import { notifyDriverSessionLost, readDriverToken } from '../utils/authSession'
 
 const API_BASE_URL_CANDIDATES = getApiBaseCandidates()
 
@@ -71,11 +71,16 @@ async function request<T>(path: string): Promise<T> {
       const token = readDriverToken()
       if (token) headers.set('Authorization', `Bearer ${token}`)
       const response = await fetch(url, { headers })
+      if (response.status === 401) {
+        notifyDriverSessionLost('unauthorized')
+        throw new Error('Session expired. Please sign in again.')
+      }
       if (!response.ok) {
         throw new Error(`Request failed with status ${response.status}`)
       }
       return response.json() as Promise<T>
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Session expired')) throw error
       lastError = error
       console.warn('[API] request failed', { baseUrl, path, error })
     }
@@ -97,11 +102,16 @@ async function requestWithInit<T>(path: string, init?: RequestInit): Promise<T> 
       const token = readDriverToken()
       if (token) headers.set('Authorization', `Bearer ${token}`)
       const response = await fetch(url, { ...init, headers })
+      if (response.status === 401) {
+        notifyDriverSessionLost('unauthorized')
+        throw new Error('Session expired. Please sign in again.')
+      }
       if (!response.ok) {
         throw new Error(`Request failed with status ${response.status}`)
       }
       return response.json() as Promise<T>
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Session expired')) throw error
       lastError = error
       console.warn('[API] request failed', { baseUrl, path, error })
     }

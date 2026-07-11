@@ -141,8 +141,14 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
     })
   }
 
+  function scrollInputIntoView(e: React.FocusEvent<HTMLInputElement>) {
+    window.setTimeout(() => {
+      e.target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 300)
+  }
+
   return (
-    <>
+    <div className="dd-pod-screen">
       <header className="dd-header">
         <div className="dd-header-row">
           <button type="button" className="dd-icon-btn" aria-label="Back" onClick={onBack}>
@@ -155,7 +161,7 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
         </div>
       </header>
 
-      <main className="dd-main" style={{ paddingBottom: 100 }}>
+      <main className="dd-main dd-main--pod-scroll">
         <div className="dd-card" style={{ padding: 14, display: 'flex', gap: 14, marginBottom: 8 }}>
           <div style={{ background: '#000', color: '#fff', padding: 10, borderRadius: 10 }}>
             <span className="material-symbols-outlined">inventory_2</span>
@@ -246,10 +252,48 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
 
         <div style={{ height: 1, background: 'var(--dd-border)', margin: '20px 0' }} />
 
-        <section>
+        <section style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center' }}>
               <span className="dd-step-num">2</span>
+              Received By
+            </h2>
+            <span
+              style={{
+                fontSize: '0.62rem',
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                padding: '4px 8px',
+                borderRadius: 8,
+                background: '#f1f5f9',
+              }}
+            >
+              REQUIRED
+            </span>
+          </div>
+          <p style={{ fontSize: '0.875rem', color: 'var(--dd-muted)', lineHeight: 1.5, marginBottom: 12 }}>
+            Enter the name of the person who received this delivery.
+          </p>
+          <label style={{ display: 'block' }}>
+            <span className="sr-only">Recipient name</span>
+            <input
+              className="dd-input"
+              placeholder="Enter recipient name"
+              value={recipient}
+              onChange={(e) => setRecipient(e.target.value)}
+              onFocus={scrollInputIntoView}
+              autoComplete="name"
+              enterKeyHint="done"
+            />
+          </label>
+        </section>
+
+        <div style={{ height: 1, background: 'var(--dd-border)', margin: '20px 0' }} />
+
+        <section>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center' }}>
+              <span className="dd-step-num">3</span>
               Customer Signature
             </h2>
             <button type="button" className="dd-link" onClick={clearSignature}>
@@ -280,16 +324,6 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
               </span>
             </div>
           </div>
-          <label style={{ display: 'block', marginTop: 18 }}>
-            <span style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--dd-muted)' }}>RECEIVED BY</span>
-            <input
-              className="dd-input"
-              placeholder="Enter recipient name"
-              value={recipient}
-              onChange={(e) => setRecipient(e.target.value)}
-              autoComplete="name"
-            />
-          </label>
         </section>
       </main>
 
@@ -324,6 +358,6 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
           <span className="material-symbols-outlined">check_circle</span>
         </button>
       </footer>
-    </>
+    </div>
   )
 }

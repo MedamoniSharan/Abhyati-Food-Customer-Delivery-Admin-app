@@ -93,7 +93,7 @@ const ZOHO_ITEMS_PAGE_FOR_FILTER = 200
 /** Parallel Zoho list calls per round-trip (Zoho has no category filter on /items). */
 const CATEGORY_ZOHO_FETCH_CONCURRENCY = 3
 /** Detail GETs to fill `custom_fields` when Zoho list rows omit them (bounded per list page). */
-const CATEGORY_HYDRATE_CONCURRENCY = 14
+const CATEGORY_HYDRATE_CONCURRENCY = 4
 
 /**
  * List items for the customer app. Supports optional `category_name` (query) by scanning Zoho pages

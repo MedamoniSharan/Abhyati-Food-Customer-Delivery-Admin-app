@@ -45,7 +45,7 @@ export async function scanItemsMissingCatalogImage({
   perPage = 200,
   searchText,
   verifyImage = false,
-  probeConcurrency = 8
+  probeConcurrency = 4
 } = {}) {
   const allRows = []
   let scanned = 0
@@ -69,7 +69,7 @@ export async function scanItemsMissingCatalogImage({
 
   if (verifyImage) {
     const needProbe = allRows.filter((row) => itemIndicatesCatalogImage(row) && rowItemId(row))
-    const n = Math.max(1, Math.min(32, Number(probeConcurrency) || 8))
+    const n = Math.max(1, Math.min(32, Number(probeConcurrency) || 4))
     let cursor = 0
     async function worker() {
       while (true) {

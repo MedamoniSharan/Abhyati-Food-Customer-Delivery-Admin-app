@@ -1433,7 +1433,7 @@ adminRoutes.get('/items/catalog-missing-images', async (req, res, next) => {
       perPage: 200,
       searchText: q.search_text,
       verifyImage,
-      probeConcurrency: q.probe_concurrency ?? 8
+      probeConcurrency: q.probe_concurrency ?? 4
     })
     let rows = getZohoItemCustomerDisplayFieldId()
       ? missing.map((row) => withCustomerProductNameVirtual(row))
@@ -1471,7 +1471,7 @@ adminRoutes.get('/items/catalog-product-categories', async (req, res, next) => {
       maxPages: q.max_pages ?? 50,
       perPage: 200,
       searchText: q.search_text,
-      hydrateConcurrency: q.hydrate_concurrency ?? 14
+      hydrateConcurrency: q.hydrate_concurrency ?? 4
     })
     res.json(summary)
   } catch (error) {
@@ -1487,7 +1487,7 @@ adminRoutes.get('/items', async (req, res, next) => {
       const needsHydration = getZohoItemCustomerDisplayFieldId() || isProductCategoryConfigured()
       if (needsHydration) {
         const { items: hydrated } = await hydrateItemsListRowsForProductCategoryField(data.items, {
-          concurrency: 12
+          concurrency: 4
         })
         data = { ...data, items: hydrated }
       }

@@ -1,5 +1,5 @@
 import { getApiBaseCandidates, logApiCandidatesOnce } from '../config/api'
-import { readDriverToken } from '../utils/authSession'
+import { notifyDriverSessionLost, readDriverToken } from '../utils/authSession'
 import type { AuthUser } from './authApi'
 
 const API_BASE_URL_CANDIDATES = getApiBaseCandidates()
@@ -71,6 +71,9 @@ export async function getDriverMe(): Promise<AuthUser | null> {
       })
       const text = await response.text()
       const data = text ? (JSON.parse(text) as { user?: AuthUser }) : {}
+      if (response.status === 401) {
+        return null
+      }
       if (!response.ok) return null
       return data.user ?? null
     } catch {
@@ -101,6 +104,10 @@ export async function patchDriverProfile(patch: ProfilePatch): Promise<{ user: A
       })
       const text = await response.text()
       const data = text ? (JSON.parse(text) as { message?: string; user?: AuthUser; token?: string }) : {}
+      if (response.status === 401) {
+        notifyDriverSessionLost('unauthorized')
+        throw new Error(data.message || 'Session expired. Please sign in again.')
+      }
       if (!response.ok) {
         throw new Error(data.message || `Request failed (${response.status})`)
       }
@@ -109,6 +116,7 @@ export async function patchDriverProfile(patch: ProfilePatch): Promise<{ user: A
       }
       return { user: data.user, token: data.token }
     } catch (error) {
+      if (error instanceof Error && error.message.includes('Session expired')) throw error
       lastError = error
       console.warn('[delivery auth] profile patch failed', { baseUrl, error })
     }

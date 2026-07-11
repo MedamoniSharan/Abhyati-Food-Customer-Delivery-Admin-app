@@ -10,7 +10,7 @@ function invoiceNeedsLineItemHydration(invoice) {
  * @param {unknown[]} invoices
  * @param {{ concurrency?: number }} [opts]
  */
-export async function hydrateInvoicesWithLineItems(invoices, { concurrency = 8 } = {}) {
+export async function hydrateInvoicesWithLineItems(invoices, { concurrency = 4 } = {}) {
   if (!Array.isArray(invoices) || invoices.length === 0) {
     return { invoices: [], detail_fetches: 0 }
   }
@@ -22,7 +22,7 @@ export async function hydrateInvoicesWithLineItems(invoices, { concurrency = 8 }
   if (needIdx.length === 0) return { invoices, detail_fetches: 0 }
 
   const out = invoices.slice()
-  const n = Math.max(1, Math.min(16, Number(concurrency) || 8))
+  const n = Math.max(1, Math.min(16, Number(concurrency) || 4))
   let cursor = 0
 
   async function worker() {

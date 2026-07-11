@@ -1,5 +1,5 @@
 import { getApiBaseCandidates, logApiCandidatesOnce } from '../config/api'
-import { readDriverToken } from '../utils/authSession'
+import { notifyDriverSessionLost, readDriverToken } from '../utils/authSession'
 
 const API_BASE_URL_CANDIDATES = getApiBaseCandidates()
 
@@ -30,12 +30,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers.set('Content-Type', 'application/json')
       if (token) headers.set('Authorization', `Bearer ${token}`)
       const response = await fetch(url, { ...init, headers })
+      if (response.status === 401) {
+        notifyDriverSessionLost('unauthorized')
+        throw new Error('Session expired. Please sign in again.')
+      }
       if (!response.ok) {
         const text = await response.text()
         throw new Error(text.slice(0, 200) || `Request failed (${response.status})`)
       }
       return (await response.json()) as T
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Session expired')) throw error
       lastError = error
     }
   }

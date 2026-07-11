@@ -175,7 +175,7 @@ export function itemListRowNeedsProductCategoryHydration(item) {
  * @param {{ concurrency?: number }} [opts]
  * @returns {Promise<{ items: unknown[], detail_fetches: number }>}
  */
-export async function hydrateItemsListRowsForProductCategoryField(items, { concurrency = 12 } = {}) {
+export async function hydrateItemsListRowsForProductCategoryField(items, { concurrency = 4 } = {}) {
   const hydrationConfigured =
     isProductCategoryConfigured() || Boolean(getZohoItemCustomerDisplayFieldId())
   if (!hydrationConfigured || !Array.isArray(items)) {
@@ -194,7 +194,7 @@ export async function hydrateItemsListRowsForProductCategoryField(items, { concu
   if (needIdx.length === 0) return { items, detail_fetches: 0 }
 
   const out = items.slice()
-  const n = Math.max(1, Math.min(32, Number(concurrency) || 12))
+  const n = Math.max(1, Math.min(32, Number(concurrency) || 4))
   let cursor = 0
 
   async function worker() {

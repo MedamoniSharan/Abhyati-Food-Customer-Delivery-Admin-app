@@ -2,6 +2,7 @@ import axios from 'axios'
 import multer from 'multer'
 import { ZodError } from 'zod'
 import { createLogger, serializeAxiosError, serializeError } from '../util/logger.js'
+import { isZohoRateLimitError } from '../services/zohoRateLimit.js'
 
 const log = createLogger('errors')
 
@@ -58,21 +59,16 @@ export function errorHandler(error, req, res, _next) {
       typeof zohoBody === 'object' && zohoBody != null && typeof zohoBody.message === 'string'
         ? zohoBody.message
         : ''
-    const zohoErrDesc =
-      typeof zohoBody === 'object' && zohoBody != null && typeof zohoBody.error_description === 'string'
-        ? zohoBody.error_description
-        : ''
-    const isRateLimited =
-      /too many requests/i.test(zohoMsg) ||
-      /too many requests/i.test(zohoErrDesc) ||
-      (typeof zohoBody === 'object' && zohoBody != null && String(zohoBody.error || '') === 'Access Denied')
+    const isRateLimited = isZohoRateLimitError(error)
     const needsAuthHint =
       !isRateLimited &&
       (rawStatus === 401 ||
         (typeof zohoBody === 'object' && zohoBody != null && Number(zohoBody.code) === 57) ||
         /not authorized/i.test(zohoMsg))
     return res.status(status).json({
-      message: isRateLimited ? 'Zoho API rate limit — try again in a minute' : 'Zoho API request failed',
+      message: isRateLimited
+        ? 'Zoho API is busy — automatic retries were exhausted. Try again shortly.'
+        : 'Zoho API request failed',
       zoho: zohoBody || error.message,
       ...(isRateLimited ? { zoho_rate_limit: true } : {}),
       ...(needsAuthHint

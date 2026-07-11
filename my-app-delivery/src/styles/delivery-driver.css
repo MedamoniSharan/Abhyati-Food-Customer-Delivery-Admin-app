@@ -100,6 +100,24 @@
   position: relative;
 }
 
+.driver-app .dd-pod-screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.driver-app .dd-main--pod-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  padding-bottom: calc(108px + env(safe-area-inset-bottom, 0px));
+}
+
 .driver-app .dd-main.dd-main--busy {
   min-height: 280px;
 }
@@ -820,7 +838,10 @@
   border-radius: 14px;
   padding: 12px 14px;
   font-size: 1rem;
-  margin-top: 8px;
+  margin-top: 0;
+  background: #fff;
+  color: var(--dd-black);
+  touch-action: manipulation;
 }
 
 .driver-app .dd-input:focus {

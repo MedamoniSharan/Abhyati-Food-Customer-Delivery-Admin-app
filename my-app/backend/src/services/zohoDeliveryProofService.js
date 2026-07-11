@@ -1,4 +1,3 @@
-import axios from 'axios'
 import { env } from '../config/env.js'
 import {
   getInvoiceAttachment,
@@ -8,6 +7,7 @@ import {
   uploadInvoiceAttachment
 } from './zohoBooksService.js'
 import { getZohoAccessToken } from './zohoAuthService.js'
+import { zohoAxios } from './zohoRateLimit.js'
 
 function parseInvoiceDocuments(invoice) {
   const raw = invoice?.documents
@@ -39,7 +39,7 @@ export async function uploadZohoDocument({ buffer, mimetype, originalname }) {
   const blob = new Blob([buffer], { type: mimetype || 'application/octet-stream' })
   form.append('attachment', blob, originalname || 'document.bin')
 
-  const response = await axios({
+  const response = await zohoAxios({
     method: 'post',
     url: `${env.ZOHO_BOOKS_BASE_URL}/documents`,
     headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
@@ -88,7 +88,7 @@ export async function attachDocumentToInvoice(invoiceId, documentId) {
 export async function getZohoDocumentFile(documentId) {
   const organizationId = await getOrganizationId()
   const accessToken = await getZohoAccessToken()
-  const response = await axios({
+  const response = await zohoAxios({
     method: 'get',
     url: `${env.ZOHO_BOOKS_BASE_URL}/documents/${encodeURIComponent(documentId)}`,
     headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
@@ -118,7 +118,7 @@ export async function appendInvoiceDeliveryNotes(invoiceId, addition) {
 export async function addInvoiceDeliveryComment(invoiceId, description) {
   const organizationId = await getOrganizationId()
   const accessToken = await getZohoAccessToken()
-  const response = await axios({
+  const response = await zohoAxios({
     method: 'post',
     url: `${env.ZOHO_BOOKS_BASE_URL}/invoices/${encodeURIComponent(invoiceId)}/comments`,
     headers: {

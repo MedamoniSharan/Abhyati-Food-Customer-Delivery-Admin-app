@@ -2,6 +2,7 @@ import axios from 'axios'
 import { env } from '../config/env.js'
 import { getOrganizationId } from './zohoBooksService.js'
 import { resolveZohoAccessToken } from './zohoTokenProvider.js'
+import { zohoAxios } from './zohoRateLimit.js'
 
 /**
  * POST multipart image to Zoho Books for an item (same catalog as GET …/image).
@@ -21,7 +22,7 @@ export async function uploadItemImageToZoho(itemId, { buffer, mimetype, original
 
   const post = async (pathSuffix) => {
     const url = `${base}${pathSuffix}`
-    return axios({
+    return zohoAxios({
       method: 'POST',
       url,
       params: { organization_id: organizationId },
@@ -73,7 +74,7 @@ export async function streamItemImageFromZoho(itemId) {
 
   const url = `${env.ZOHO_BOOKS_BASE_URL}/items/${encodeURIComponent(itemId)}/image`
 
-  const zohoResponse = await axios({
+  const zohoResponse = await zohoAxios({
     method: 'GET',
     url,
     params: { organization_id: organizationId },
@@ -120,7 +121,7 @@ export async function probeZohoItemImageExists(itemId) {
   const url = `${env.ZOHO_BOOKS_BASE_URL}/items/${encodeURIComponent(String(itemId).trim())}/image`
 
   try {
-    const headRes = await axios({
+    const headRes = await zohoAxios({
       method: 'HEAD',
       url,
       params: { organization_id: organizationId },
@@ -134,7 +135,7 @@ export async function probeZohoItemImageExists(itemId) {
     // continue to GET
   }
 
-  const zohoResponse = await axios({
+  const zohoResponse = await zohoAxios({
     method: 'GET',
     url,
     params: { organization_id: organizationId },

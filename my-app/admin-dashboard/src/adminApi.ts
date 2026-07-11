@@ -104,7 +104,7 @@ export async function adminFetch<T>(path: string, init: RequestInit = {}): Promi
     if (typeof zohoHint === 'string' && zohoHint.trim()) {
       msg = `${msg}. ${zohoHint}`
     } else if (data.zoho_rate_limit) {
-      msg = `${msg}. Wait a minute and refresh — Zoho throttled API requests.`
+      msg = `${msg}. The server retried automatically — please try once more.`
     } else if (res.status === 502 && msg.toLowerCase().includes('not authorized')) {
       msg =
         `${msg} Update ZOHO_REFRESH_TOKEN on the API server (Render .env or local my-app/backend/.env) with Books full-access scopes.`
