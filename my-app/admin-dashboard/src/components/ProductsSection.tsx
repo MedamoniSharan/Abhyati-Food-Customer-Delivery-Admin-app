@@ -1505,14 +1505,14 @@ export function ProductsSection() {
                     <label className="admin-file-label admin-file-label--block admin-file-label--cta">
                       <span className="admin-file-label__button">Select files</span>
                       <span className="admin-file-label__text">{editProductImage ? editProductImage.name : 'Replace image (optional)'}</span>
+                      <input
+                        ref={editImageInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/gif,image/webp"
+                        className="admin-file-input"
+                        onChange={(e) => setEditProductImage(e.target.files?.[0] ?? null)}
+                      />
                     </label>
-                    <input
-                      ref={editImageInputRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/gif,image/webp"
-                      className="admin-file-input"
-                      onChange={(e) => setEditProductImage(e.target.files?.[0] ?? null)}
-                    />
                   </div>
                 </div>
               </div>
@@ -1803,14 +1803,14 @@ export function ProductsSection() {
                 <label className="admin-file-label admin-file-label--block admin-file-label--cta">
                   <span className="admin-file-label__button">Select files</span>
                   <span className="admin-file-label__text">{newProductImage ? newProductImage.name : 'No file selected'}</span>
+                  <input
+                    ref={newProductImageInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    className="admin-file-input"
+                    onChange={(e) => setNewProductImage(e.target.files?.[0] ?? null)}
+                  />
                 </label>
-                <input
-                  ref={newProductImageInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/gif,image/webp"
-                  className="admin-file-input"
-                  onChange={(e) => setNewProductImage(e.target.files?.[0] ?? null)}
-                />
               </div>
             </div>
             <div className="admin-modal__footer">
