@@ -234,7 +234,7 @@ export function ProductsSection() {
   const [bulkCategoryId, setBulkCategoryId] = useState('')
   const [view, setView] = useState<'grid' | 'table'>('grid')
   const [page, setPage] = useState(1)
-  const [perPage, setPerPage] = useState<(typeof PER_PAGE_OPTIONS)[number]>(24)
+  const [perPage, setPerPage] = useState<(typeof PER_PAGE_OPTIONS)[number]>(12)
   const [searchInput, setSearchInput] = useState('')
   /** Query sent to Zoho; only updated when the user clicks Search (or presses Enter). */
   const [appliedSearch, setAppliedSearch] = useState('')
