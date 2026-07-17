@@ -14,6 +14,7 @@
     "zoho:pricing-env": "node scripts/show-zoho-pricing-env.mjs",
     "zoho:item-customer-name-env": "node scripts/show-zoho-item-customer-name-env.mjs",
     "zoho:setup-item-customer-display-field": "node scripts/setup-zoho-item-customer-display-field.mjs",
+    "zoho:setup-item-min-purchase-field": "node scripts/setup-zoho-item-min-purchase-field.mjs",
     "zoho:product-categories-env": "node scripts/show-zoho-product-categories-env.mjs",
     "zoho:setup-product-categories-json-field": "node scripts/setup-zoho-product-categories-json-field.mjs",
     "zoho:inventory-account": "node scripts/show-zoho-inventory-account.mjs",

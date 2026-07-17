@@ -38,6 +38,7 @@ type BulkRowDraft = {
   status: string
   rate: string
   stock: string
+  min_purchase_count: string
   description: string
   unit: string
 }
@@ -49,6 +50,7 @@ function resolveCategoryIdFromItem(it: ZohoItemRow): string {
 
 function itemToBulkDraft(it: ZohoItemRow): BulkRowDraft {
   const stock = readItemStock(it)
+  const mpc = it.min_purchase_count
   return {
     name: String(it.name ?? ''),
     customer_product_name: typeof it.customer_product_name === 'string' ? it.customer_product_name : '',
@@ -58,6 +60,7 @@ function itemToBulkDraft(it: ZohoItemRow): BulkRowDraft {
     status: String(it.status ?? 'active'),
     rate: it.rate != null && it.rate !== '' ? String(it.rate) : '',
     stock: stock != null ? String(stock) : '',
+    min_purchase_count: mpc != null && mpc !== '' ? String(mpc) : '',
     description: String(it.description ?? ''),
     unit: it.unit != null && String(it.unit).trim() ? String(it.unit).trim() : ''
   }
@@ -73,6 +76,7 @@ function bulkDraftsEqual(a: BulkRowDraft, b: BulkRowDraft): boolean {
     a.status === b.status &&
     a.rate === b.rate &&
     a.stock === b.stock &&
+    a.min_purchase_count === b.min_purchase_count &&
     a.description === b.description &&
     a.unit === b.unit
   )
@@ -116,6 +120,17 @@ function buildBulkSavePayload(
         throw new Error('Enter a valid stock quantity (0 or greater)')
       }
       payload.stock_on_hand = sq
+    }
+  }
+  if (draft.min_purchase_count !== original.min_purchase_count) {
+    if (draft.min_purchase_count.trim() === '') {
+      payload.min_purchase_count = ''
+    } else {
+      const mq = Number(draft.min_purchase_count.trim())
+      if (!Number.isFinite(mq) || mq < 1 || !Number.isInteger(mq)) {
+        throw new Error('Min purchase count must be a whole number of 1 or greater')
+      }
+      payload.min_purchase_count = mq
     }
   }
   if (draft.description !== original.description) {
@@ -212,6 +227,7 @@ function UploadIcon() {
 export function ProductsSection() {
   const { toast } = useToast()
   const [itemCustomerNameFieldConfigured, setItemCustomerNameFieldConfigured] = useState<boolean | null>(null)
+  const [itemMinPurchaseFieldConfigured, setItemMinPurchaseFieldConfigured] = useState<boolean | null>(null)
   const [productCategories, setProductCategories] = useState<ProductCat[]>([])
   const [productCategoriesConfigured, setProductCategoriesConfigured] = useState(false)
   const [editingCategoryId, setEditingCategoryId] = useState('')
@@ -236,7 +252,8 @@ export function ProductsSection() {
     unit: 'unit',
     description: '',
     product_type: 'goods' as 'goods' | 'service' | 'digital_service',
-    product_category_id: ''
+    product_category_id: '',
+    min_purchase_count: ''
   })
   const [newProductImage, setNewProductImage] = useState<File | null>(null)
   const [isDraggingNewImage, setIsDraggingNewImage] = useState(false)
@@ -245,6 +262,7 @@ export function ProductsSection() {
   const [editingRate, setEditingRate] = useState('')
   const [editingStock, setEditingStock] = useState('')
   const [editingCustomerProductName, setEditingCustomerProductName] = useState('')
+  const [editingMinPurchaseCount, setEditingMinPurchaseCount] = useState('')
   const [editProductImage, setEditProductImage] = useState<File | null>(null)
   const [editImageObjectUrl, setEditImageObjectUrl] = useState<string | null>(null)
   const [isDraggingEditImage, setIsDraggingEditImage] = useState(false)
@@ -272,6 +290,19 @@ export function ProductsSection() {
       })
       .catch(() => {
         if (!cancelled) setItemCustomerNameFieldConfigured(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  useEffect(() => {
+    let cancelled = false
+    adminFetch<{ configured?: boolean }>('/api/admin/item-min-purchase-field')
+      .then((r) => {
+        if (!cancelled) setItemMinPurchaseFieldConfigured(!!r.configured)
+      })
+      .catch(() => {
+        if (!cancelled) setItemMinPurchaseFieldConfigured(false)
       })
     return () => {
       cancelled = true
@@ -315,6 +346,15 @@ export function ProductsSection() {
     }
     const cpn = editingItem.customer_product_name
     setEditingCustomerProductName(typeof cpn === 'string' ? cpn : '')
+  }, [editingItem])
+
+  useEffect(() => {
+    if (!editingItem) {
+      setEditingMinPurchaseCount('')
+      return
+    }
+    const mpc = editingItem.min_purchase_count
+    setEditingMinPurchaseCount(mpc != null && mpc !== '' ? String(mpc) : '')
   }, [editingItem])
 
   useEffect(() => {
@@ -649,6 +689,15 @@ export function ProductsSection() {
       toast('Name and rate are required', 'info')
       return
     }
+    let minPurchase: number | undefined
+    if (newProduct.min_purchase_count.trim()) {
+      const mq = Number(newProduct.min_purchase_count.trim())
+      if (!Number.isFinite(mq) || mq < 1 || !Number.isInteger(mq)) {
+        toast('Min purchase count must be a whole number of 1 or greater', 'info')
+        return
+      }
+      minPurchase = mq
+    }
     setCreatingProduct(true)
     try {
       const created = await adminFetch<{ item?: { item_id?: string } }>('/api/admin/items', {
@@ -662,7 +711,8 @@ export function ProductsSection() {
           ...(newProduct.description.trim() ? { description: newProduct.description.trim() } : {}),
           ...(productCategoriesConfigured && newProduct.product_category_id.trim()
             ? { product_category_id: newProduct.product_category_id.trim() }
-            : {})
+            : {}),
+          ...(minPurchase != null ? { min_purchase_count: minPurchase } : {})
         })
       })
       const itemId = created.item?.item_id != null ? String(created.item.item_id) : ''
@@ -684,7 +734,8 @@ export function ProductsSection() {
         unit: 'unit',
         description: '',
         product_type: 'goods',
-        product_category_id: ''
+        product_category_id: '',
+        min_purchase_count: ''
       })
       setNewProductImage(null)
       setIsDraggingNewImage(false)
@@ -1165,6 +1216,7 @@ export function ProductsSection() {
                   <th>Status</th>
                   <th>Rate</th>
                   <th>Stock</th>
+                  <th>Min purchase</th>
                   <th>Item ID</th>
                   <th scope="col" className="admin-th-actions">
                     Actions
@@ -1183,6 +1235,7 @@ export function ProductsSection() {
                         <td><div className="admin-skeleton admin-skeleton--line" /></td>
                         <td><div className="admin-skeleton admin-skeleton--line" /></td>
                         <td><div className="admin-skeleton admin-skeleton--pill" /></td>
+                        <td><div className="admin-skeleton admin-skeleton--line" /></td>
                         <td><div className="admin-skeleton admin-skeleton--line" /></td>
                         <td><div className="admin-skeleton admin-skeleton--line" /></td>
                         <td><div className="admin-skeleton admin-skeleton--line" /></td>
@@ -1353,6 +1406,25 @@ export function ProductsSection() {
                               />
                             ) : (
                               readItemStock(it) ?? '—'
+                            )}
+                          </td>
+                          <td>
+                            {bulkEditMode && draft && id ? (
+                              <input
+                                className="admin-table-input admin-table-input--narrow"
+                                value={draft.min_purchase_count}
+                                inputMode="numeric"
+                                min={1}
+                                step={1}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updateBulkDraftField(id, 'min_purchase_count', e.target.value)}
+                                aria-label={`Min purchase count for ${name}`}
+                                placeholder="e.g. 10"
+                              />
+                            ) : (
+                              it.min_purchase_count != null && it.min_purchase_count !== ''
+                                ? String(it.min_purchase_count)
+                                : '—'
                             )}
                           </td>
                           <td className="admin-td-mono">{id}</td>
@@ -1586,6 +1658,26 @@ export function ProductsSection() {
               />
             </label>
             <label className="admin-field-label">
+              <span>Min purchase count</span>
+              <input
+                className="admin-input"
+                type="number"
+                min={1}
+                step="1"
+                placeholder="Minimum quantity customers must order (e.g. 10)"
+                value={editingMinPurchaseCount}
+                onChange={(e) => setEditingMinPurchaseCount(e.target.value)}
+                aria-label="Min purchase count"
+              />
+            </label>
+            {itemMinPurchaseFieldConfigured === false ? (
+              <p className="admin-muted" style={{ fontSize: '0.8rem', marginTop: -8, marginBottom: 12 }}>
+                Set <code>ZOHO_CUSTOM_FIELD_ITEM_MIN_PURCHASE_ID</code> in the backend <code>.env</code> (or run{' '}
+                <code>npm run zoho:setup-item-min-purchase-field</code>) so this value saves to Zoho. Until then, the
+                customer app keeps its default minimum.
+              </p>
+            ) : null}
+            <label className="admin-field-label">
               <span>SKU</span>
               <input
                 className="admin-input"
@@ -1636,6 +1728,17 @@ export function ProductsSection() {
                     }
                     stockPayload = { stock_on_hand: sq }
                   }
+                  let minPurchasePayload: { min_purchase_count: number | string } | Record<string, never> = {}
+                  if (editingMinPurchaseCount.trim() === '') {
+                    minPurchasePayload = { min_purchase_count: '' }
+                  } else {
+                    const mq = Number(editingMinPurchaseCount.trim())
+                    if (!Number.isFinite(mq) || mq < 1 || !Number.isInteger(mq)) {
+                      toast('Min purchase count must be a whole number of 1 or greater', 'info')
+                      return
+                    }
+                    minPurchasePayload = { min_purchase_count: mq }
+                  }
                   const unitRaw = editingItem.unit
                   const unitStr = unitRaw != null && String(unitRaw).trim() ? String(unitRaw).trim() : ''
                   const ptype = editingItem.product_type
@@ -1650,6 +1753,7 @@ export function ProductsSection() {
                         ...(unitStr ? { unit: unitStr } : {}),
                         ...(ptypeStr ? { product_type: ptypeStr } : {}),
                         ...stockPayload,
+                        ...minPurchasePayload,
                         sku: editingItem.sku || undefined,
                         description: editingItem.description || undefined,
                         ...(productCategoriesConfigured ? { product_category_id: editingCategoryId.trim() } : {})
@@ -1763,6 +1867,17 @@ export function ProductsSection() {
                   ))}
                 </select>
               ) : null}
+              <input
+                className="admin-input"
+                style={{ width: 140 }}
+                type="number"
+                min={1}
+                step={1}
+                placeholder="Min purchase"
+                value={newProduct.min_purchase_count}
+                onChange={(e) => setNewProduct((p) => ({ ...p, min_purchase_count: e.target.value }))}
+                aria-label="Min purchase count"
+              />
               <input
                 className="admin-input admin-input--grow"
                 placeholder="Description"

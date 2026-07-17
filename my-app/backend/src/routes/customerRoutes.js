@@ -31,11 +31,15 @@ import {
 import {
   enrichCustomerItemsResponse,
   enrichCustomerSingleItemResponse,
-  getItemCatalogCategoryForCustomerFilter,
   hydrateItemsListRowsForProductCategoryField,
   isProductCategoryConfigured,
   listProductCategories
 } from '../services/productCategoryZohoService.js'
+import {
+  listIndexedItemsByCategory,
+  warmItemCategoryIndex
+} from '../services/itemCategoryIndexCache.js'
+import { enrichMinPurchaseOnItemResponse, enrichMinPurchaseOnItemsListResponse, getZohoItemMinPurchaseFieldId } from '../services/zohoItemMinPurchase.js'
 
 const lineItemSchema = z.object({
   item_id: z.string().min(1).optional(),
@@ -82,22 +86,11 @@ function normalizeCategoryNameQuery(value) {
   return s
 }
 
-function itemMatchesCategoryNameFilter(item, filterRaw) {
-  const want = String(filterRaw || '').trim().toLowerCase()
-  if (!want) return true
-  return getItemCatalogCategoryForCustomerFilter(item).toLowerCase() === want
-}
-
-const MAX_ZOHO_PAGES_FOR_CATEGORY = 40
-const ZOHO_ITEMS_PAGE_FOR_FILTER = 200
-/** Parallel Zoho list calls per round-trip (Zoho has no category filter on /items). */
-const CATEGORY_ZOHO_FETCH_CONCURRENCY = 3
-/** Detail GETs to fill `custom_fields` when Zoho list rows omit them (bounded per list page). */
 const CATEGORY_HYDRATE_CONCURRENCY = 4
 
 /**
- * List items for the customer app. Supports optional `category_name` (query) by scanning Zoho pages
- * until enough matching rows exist for the requested app page (Zoho does not filter by our custom field).
+ * List items for the customer app. Category filters use an in-memory index (built once per TTL)
+ * so chip taps do not re-scan Zoho on every request.
  */
 async function listCustomerItemsForApp(query, customerEmail) {
   const pageNum = query.page && query.page > 0 ? query.page : 1
@@ -106,66 +99,43 @@ async function listCustomerItemsForApp(query, customerEmail) {
   const tier = await getActiveTierForCustomerEmail(customerEmail)
 
   if (!categoryFilter) {
+    // Warm category index in the background so the next chip tap is fast.
+    warmItemCategoryIndex()
     const data = await listModule('/items', { page: pageNum, per_page: perPage })
     const batch = Array.isArray(data?.items) ? data.items : []
     const { items: hydratedList } = await hydrateItemsListRowsForProductCategoryField(batch, {
-      concurrency: CATEGORY_HYDRATE_CONCURRENCY
+      concurrency: CATEGORY_HYDRATE_CONCURRENCY,
+      hydrateCategory: true,
+      hydrateCustomerName: true
     })
     let out = applyTierToItemsResponse({ ...data, items: hydratedList }, tier)
     if (isProductCategoryConfigured()) out = enrichCustomerItemsResponse(out)
+    if (getZohoItemMinPurchaseFieldId()) out = enrichMinPurchaseOnItemsListResponse(out)
     return out
   }
 
-  const wantTotal = pageNum * perPage
-  const accum = []
-  let zohoPage = 1
-  let lastHasMore = false
-  while (accum.length < wantTotal && zohoPage <= MAX_ZOHO_PAGES_FOR_CATEGORY) {
-    const chunkEnd = Math.min(
-      zohoPage + CATEGORY_ZOHO_FETCH_CONCURRENCY - 1,
-      MAX_ZOHO_PAGES_FOR_CATEGORY
-    )
-    const pageNums = []
-    for (let p = zohoPage; p <= chunkEnd; p++) pageNums.push(p)
-    const results = await Promise.all(
-      pageNums.map((p) => listModule('/items', { page: p, per_page: ZOHO_ITEMS_PAGE_FOR_FILTER }))
-    )
-
-    let pagesConsumed = 0
-    for (const data of results) {
-      pagesConsumed += 1
-      const batch = Array.isArray(data?.items) ? data.items : []
-      const { items: hydratedBatch } = await hydrateItemsListRowsForProductCategoryField(batch, {
-        concurrency: CATEGORY_HYDRATE_CONCURRENCY
-      })
-      for (const it of hydratedBatch) {
-        if (itemMatchesCategoryNameFilter(it, categoryFilter)) accum.push(it)
-        if (accum.length >= wantTotal) break
-      }
-      lastHasMore = Boolean(data?.page_context?.has_more_page)
-      if (accum.length >= wantTotal) break
-      if (!lastHasMore) break
+  if (!isProductCategoryConfigured()) {
+    // No Zoho category CF configured — fall back to empty filter result rather than a full catalog scan.
+    return {
+      code: 0,
+      message: 'success',
+      items: [],
+      page_context: { page: pageNum, per_page: perPage, has_more_page: false }
     }
-    zohoPage += pagesConsumed
-    if (!lastHasMore) break
-    if (accum.length >= wantTotal) break
   }
 
-  const start = (pageNum - 1) * perPage
-  const slice = accum.slice(start, start + perPage)
-  let out = applyTierToItemsResponse({ code: 0, message: 'success', items: slice }, tier)
+  const indexed = await listIndexedItemsByCategory(categoryFilter, { page: pageNum, perPage })
+  let out = applyTierToItemsResponse(
+    { code: 0, message: 'success', items: indexed.items, page_context: indexed.page_context },
+    tier
+  )
   if (isProductCategoryConfigured()) out = enrichCustomerItemsResponse(out)
-  const hasMorePage = accum.length > pageNum * perPage || lastHasMore
-
+  if (getZohoItemMinPurchaseFieldId()) out = enrichMinPurchaseOnItemsListResponse(out)
   return {
     code: 0,
     message: 'success',
     items: out.items || [],
-    page_context: {
-      page: pageNum,
-      per_page: perPage,
-      has_more_page: hasMorePage
-    }
+    page_context: indexed.page_context
   }
 }
 
@@ -180,6 +150,7 @@ customerRoutes.get('/product-categories', async (_req, res, next) => {
       res.json({ configured: false, categories: [] })
       return
     }
+    warmItemCategoryIndex()
     const categories = await listProductCategories()
     res.json({ configured: true, categories })
   } catch (error) {
@@ -204,6 +175,7 @@ customerRoutes.get('/items/:id', async (req, res, next) => {
     const tier = await getActiveTierForCustomerEmail(req.customer.email)
     let out = applyTierToSingleItemResponse(data, tier)
     if (isProductCategoryConfigured()) out = enrichCustomerSingleItemResponse(out)
+    if (getZohoItemMinPurchaseFieldId()) out = enrichMinPurchaseOnItemResponse(out)
     res.json(out)
   } catch (error) {
     next(error)

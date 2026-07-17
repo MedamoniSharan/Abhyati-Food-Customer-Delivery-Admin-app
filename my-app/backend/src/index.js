@@ -15,6 +15,7 @@ import { itemImageRoutes } from './routes/itemImageRoutes.js'
 import { zohoRoutes } from './routes/zohoRoutes.js'
 import { seedDefaultUser } from './services/authStore.js'
 import { migrateLegacyJsonCredentialsOnce } from './services/migrateLegacyJsonCredentials.js'
+import { warmItemCategoryIndex } from './services/itemCategoryIndexCache.js'
 
 const log = createLogger('bootstrap')
 
@@ -61,6 +62,8 @@ async function start() {
       zohoRegion: env.ZOHO_REGION
     })
     log.info('Default customer login email (dev reference)', { email: env.AUTH_DEFAULT_CUSTOMER_EMAIL })
+    // Pre-build category index so chip filters are fast after startup.
+    warmItemCategoryIndex()
   })
 }
 

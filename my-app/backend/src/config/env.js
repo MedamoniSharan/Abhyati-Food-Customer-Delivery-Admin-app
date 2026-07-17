@@ -57,6 +57,11 @@ const envSchema = z.object({
    * When set, GET /api/customer/items replaces `name` with this value for the app catalog; admin edit saves here and keeps Zoho `name` read-only.
    */
   ZOHO_CUSTOM_FIELD_ITEM_CUSTOMER_NAME_ID: z.string().optional(),
+  /**
+   * Item custom field id for minimum purchase / order quantity (optional).
+   * When set, admin can edit `min_purchase_count`; customer app uses it as MOQ.
+   */
+  ZOHO_CUSTOM_FIELD_ITEM_MIN_PURCHASE_ID: z.string().optional(),
 
   /**
    * Product categories (separate from customer pricing tiers): JSON array on a Zoho contact

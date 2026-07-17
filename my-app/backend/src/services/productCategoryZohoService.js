@@ -172,21 +172,28 @@ export function itemListRowNeedsProductCategoryHydration(item) {
 
 /**
  * @param {unknown[]} items
- * @param {{ concurrency?: number }} [opts]
+ * @param {{
+ *   concurrency?: number
+ *   hydrateCategory?: boolean
+ *   hydrateCustomerName?: boolean
+ * }} [opts]
  * @returns {Promise<{ items: unknown[], detail_fetches: number }>}
  */
-export async function hydrateItemsListRowsForProductCategoryField(items, { concurrency = 4 } = {}) {
-  const hydrationConfigured =
-    isProductCategoryConfigured() || Boolean(getZohoItemCustomerDisplayFieldId())
-  if (!hydrationConfigured || !Array.isArray(items)) {
+export async function hydrateItemsListRowsForProductCategoryField(
+  items,
+  { concurrency = 4, hydrateCategory = true, hydrateCustomerName = true } = {}
+) {
+  const wantCategory = hydrateCategory && isProductCategoryConfigured()
+  const wantCustomerName = hydrateCustomerName && Boolean(getZohoItemCustomerDisplayFieldId())
+  if ((!wantCategory && !wantCustomerName) || !Array.isArray(items)) {
     return { items: Array.isArray(items) ? items : [], detail_fetches: 0 }
   }
 
   const needIdx = []
   for (let i = 0; i < items.length; i += 1) {
     if (
-      itemListRowNeedsProductCategoryHydration(items[i]) ||
-      itemListRowNeedsCustomerProductNameHydration(items[i])
+      (wantCategory && itemListRowNeedsProductCategoryHydration(items[i])) ||
+      (wantCustomerName && itemListRowNeedsCustomerProductNameHydration(items[i]))
     ) {
       needIdx.push(i)
     }

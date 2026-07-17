@@ -49,6 +49,11 @@ import {
   withCustomerProductNameVirtual
 } from '../services/zohoItemCustomerDisplay.js'
 import {
+  getZohoItemMinPurchaseFieldId,
+  mergeMinPurchaseIntoItemCustomFields,
+  withMinPurchaseCountVirtual
+} from '../services/zohoItemMinPurchase.js'
+import {
   getZohoItemCategoryFieldId,
   getProductCategoryEnvStatus,
   invalidateProductCategoryCache,
@@ -60,6 +65,7 @@ import {
   hydrateItemsListRowsForProductCategoryField,
   withItemProductCategoryVirtual
 } from '../services/productCategoryZohoService.js'
+import { invalidateItemCategoryIndex } from '../services/itemCategoryIndexCache.js'
 import { createAssignment, getAssignmentById, listAssignments } from '../services/deliveryAssignmentStore.js'
 import {
   notifyCustomerDriverAssigned,
@@ -431,6 +437,11 @@ adminRoutes.get('/item-customer-name-field', (_req, res) => {
   res.json({ configured: getZohoItemCustomerDisplayFieldId() !== '' })
 })
 
+/** Whether backend `.env` maps min purchase count to a Zoho Books item custom field (no Zoho I/O). */
+adminRoutes.get('/item-min-purchase-field', (_req, res) => {
+  res.json({ configured: getZohoItemMinPurchaseFieldId() !== '' })
+})
+
 adminRoutes.get('/product-categories', async (_req, res, next) => {
   try {
     const envStatus = getProductCategoryEnvStatus()
@@ -449,6 +460,7 @@ adminRoutes.post('/product-categories', async (req, res, next) => {
   try {
     const { name } = z.object({ name: z.string().min(1).max(200) }).parse(req.body)
     invalidateProductCategoryCache()
+    invalidateItemCategoryIndex()
     const list = await listProductCategories()
     const id = newProductCategoryId()
     await saveProductCategoriesFull([...list, { id, name: name.trim() }])
@@ -464,6 +476,7 @@ adminRoutes.put('/product-categories/:categoryId', async (req, res, next) => {
     const categoryId = z.string().min(1).parse(req.params.categoryId)
     const { name } = z.object({ name: z.string().min(1).max(200) }).parse(req.body)
     invalidateProductCategoryCache()
+    invalidateItemCategoryIndex()
     const list = await listProductCategories()
     const idx = list.findIndex((c) => c.id === categoryId)
     if (idx < 0) {
@@ -485,6 +498,7 @@ adminRoutes.delete('/product-categories/:categoryId', async (req, res, next) => 
   try {
     const categoryId = z.string().min(1).parse(req.params.categoryId)
     invalidateProductCategoryCache()
+    invalidateItemCategoryIndex()
     const list = await listProductCategories()
     const nextList = list.filter((c) => c.id !== categoryId)
     if (nextList.length === list.length) {
@@ -1438,6 +1452,9 @@ adminRoutes.get('/items/catalog-missing-images', async (req, res, next) => {
     let rows = getZohoItemCustomerDisplayFieldId()
       ? missing.map((row) => withCustomerProductNameVirtual(row))
       : missing
+    if (getZohoItemMinPurchaseFieldId()) {
+      rows = rows.map((row) => withMinPurchaseCountVirtual(row))
+    }
     if (isProductCategoryConfigured()) {
       try {
         const cats = await listProductCategories()
@@ -1484,7 +1501,10 @@ adminRoutes.get('/items', async (req, res, next) => {
     const query = z.object({}).passthrough().parse(req.query)
     let data = await listModule('/items', query)
     if (data?.items && Array.isArray(data.items)) {
-      const needsHydration = getZohoItemCustomerDisplayFieldId() || isProductCategoryConfigured()
+      const needsHydration =
+        getZohoItemCustomerDisplayFieldId() ||
+        getZohoItemMinPurchaseFieldId() ||
+        isProductCategoryConfigured()
       if (needsHydration) {
         const { items: hydrated } = await hydrateItemsListRowsForProductCategoryField(data.items, {
           concurrency: 4
@@ -1494,6 +1514,9 @@ adminRoutes.get('/items', async (req, res, next) => {
     }
     if (getZohoItemCustomerDisplayFieldId() && data?.items && Array.isArray(data.items)) {
       data = { ...data, items: data.items.map((row) => withCustomerProductNameVirtual(row)) }
+    }
+    if (getZohoItemMinPurchaseFieldId() && data?.items && Array.isArray(data.items)) {
+      data = { ...data, items: data.items.map((row) => withMinPurchaseCountVirtual(row)) }
     }
     if (isProductCategoryConfigured() && data?.items && Array.isArray(data.items)) {
       try {
@@ -1525,6 +1548,9 @@ adminRoutes.get('/items/:id', async (req, res, next) => {
       virt = withCustomerProductNameVirtual(rawItem)
     } else {
       virt = { ...rawItem }
+    }
+    if (getZohoItemMinPurchaseFieldId()) {
+      virt = withMinPurchaseCountVirtual(virt)
     }
     if (isProductCategoryConfigured()) {
       try {
@@ -1559,26 +1585,52 @@ adminRoutes.post('/items', async (req, res, next) => {
     }
     const data = await createModule('/items', payload)
     appendAdminAudit({ action: 'admin_create_item', meta: { item: data?.item?.item_id } })
+    invalidateItemCategoryIndex()
     const newId = data?.item?.item_id != null ? String(data.item.item_id) : ''
     if (newId && raw && typeof raw === 'object') {
-      const catName = await resolveProductCategoryNameFromAdminBody(raw)
-      if (catName !== null && catName !== '' && getZohoItemCategoryFieldId()) {
-        try {
-          const fresh = await getModuleById('/items', newId)
-          const ex = fresh?.item ?? fresh
-          if (ex && typeof ex === 'object') {
-            const cfs = mergeProductCategoryNameIntoItemCustomFields(ex, catName)
-            if (cfs) {
-              const zohoBody = mergeAdminItemUpdateWithZohoExisting({ custom_fields: cfs }, ex)
-              await updateModule('/items', newId, zohoBody)
-              const again = await getModuleById('/items', newId)
-              res.status(201).json(again)
+      try {
+        const fresh = await getModuleById('/items', newId)
+        let ex = fresh?.item ?? fresh
+        if (ex && typeof ex === 'object') {
+          let cfs = null
+          const catName = await resolveProductCategoryNameFromAdminBody(raw)
+          if (catName !== null && catName !== '' && getZohoItemCategoryFieldId()) {
+            cfs = mergeProductCategoryNameIntoItemCustomFields(ex, catName)
+            if (cfs) ex = { ...ex, custom_fields: cfs }
+          }
+          if (Object.prototype.hasOwnProperty.call(raw, 'min_purchase_count') && getZohoItemMinPurchaseFieldId()) {
+            cfs = mergeMinPurchaseIntoItemCustomFields(ex, raw.min_purchase_count)
+            if (cfs) ex = { ...ex, custom_fields: cfs }
+          }
+          if (cfs) {
+            const zohoBody = mergeAdminItemUpdateWithZohoExisting({ custom_fields: cfs }, ex)
+            await updateModule('/items', newId, zohoBody)
+            const again = await getModuleById('/items', newId)
+            let virt = again?.item ?? again
+            if (virt && getZohoItemCustomerDisplayFieldId()) virt = withCustomerProductNameVirtual(virt)
+            if (virt && getZohoItemMinPurchaseFieldId()) virt = withMinPurchaseCountVirtual(virt)
+            if (virt && isProductCategoryConfigured()) {
+              try {
+                const cats = await listProductCategories()
+                virt = withItemProductCategoryVirtual(virt, cats)
+              } catch {
+                /* ignore */
+              }
+            }
+            if (virt && again?.item) {
+              res.status(201).json({ ...again, item: virt })
               return
             }
+            if (virt) {
+              res.status(201).json(virt)
+              return
+            }
+            res.status(201).json(again)
+            return
           }
-        } catch {
-          /* fall through */
         }
+      } catch {
+        /* fall through */
       }
     }
     res.status(201).json(data)
@@ -1629,6 +1681,20 @@ adminRoutes.put('/items/:id', async (req, res, next) => {
       delete cleanBody.customer_product_name
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, 'min_purchase_count')) {
+      if (getZohoItemMinPurchaseFieldId() && existingItem) {
+        const virtualItem = {
+          ...existingItem,
+          custom_fields: Array.isArray(cleanBody.custom_fields)
+            ? cleanBody.custom_fields
+            : existingItem.custom_fields
+        }
+        const mergedMin = mergeMinPurchaseIntoItemCustomFields(virtualItem, body.min_purchase_count)
+        if (mergedMin) cleanBody.custom_fields = mergedMin
+      }
+      delete cleanBody.min_purchase_count
+    }
+
     const catName = await resolveProductCategoryNameFromAdminBody(body)
     if (catName !== null && existingItem && getZohoItemCategoryFieldId()) {
       const virtualItem = {
@@ -1652,6 +1718,7 @@ adminRoutes.put('/items/:id', async (req, res, next) => {
       data = await updateModule('/items', id, zohoBody)
     }
     appendAdminAudit({ action: 'admin_update_item', meta: { id } })
+    invalidateItemCategoryIndex()
 
     try {
       const fresh = await getModuleById('/items', id)
@@ -1661,6 +1728,9 @@ adminRoutes.put('/items/:id', async (req, res, next) => {
         virt = withCustomerProductNameVirtual(rawItem)
       } else if (rawItem) {
         virt = { ...rawItem }
+      }
+      if (virt && getZohoItemMinPurchaseFieldId()) {
+        virt = withMinPurchaseCountVirtual(virt)
       }
       if (virt && isProductCategoryConfigured()) {
         try {
@@ -1687,6 +1757,7 @@ adminRoutes.delete('/items/:id', async (req, res, next) => {
     try {
       const data = await deleteModule('/items', id)
       appendAdminAudit({ action: 'admin_delete_item', meta: { id } })
+      invalidateItemCategoryIndex()
       return res.json(data)
     } catch (err) {
       if (!axios.isAxiosError(err)) throw err
@@ -1694,6 +1765,7 @@ adminRoutes.delete('/items/:id', async (req, res, next) => {
       if (shouldFallbackItemDeleteToInactive(zohoBody)) {
         const data = await markZohoItemInactive(id)
         appendAdminAudit({ action: 'admin_deactivate_item', meta: { id, reason: 'zoho_refused_delete' } })
+        invalidateItemCategoryIndex()
         const hint =
           typeof zohoBody?.message === 'string' && zohoBody.message.trim()
             ? `${zohoBody.message.trim()} It was marked inactive in Zoho instead.`

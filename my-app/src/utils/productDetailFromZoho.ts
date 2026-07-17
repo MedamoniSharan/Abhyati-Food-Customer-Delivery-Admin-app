@@ -129,9 +129,14 @@ export function zohoUnitLabel(item: Record<string, unknown>): string {
 
 const DEFAULT_MIN_ORDER = 10
 
-/** Min order quantity: custom field or description hint, else default. */
+/** Min order quantity: virtual field, custom field, or description hint, else default. */
 export function zohoMinOrderQuantity(item: Record<string, unknown> | null, fallback = DEFAULT_MIN_ORDER): number {
   if (!item) return fallback
+  const mpc = item.min_purchase_count
+  if (mpc != null && String(mpc).trim() !== '') {
+    const v = Number(mpc)
+    if (Number.isFinite(v) && v > 0) return Math.floor(v)
+  }
   const cf = item.custom_fields
   if (Array.isArray(cf)) {
     for (const raw of cf) {
@@ -139,7 +144,8 @@ export function zohoMinOrderQuantity(item: Record<string, unknown> | null, fallb
       const f = raw as Record<string, unknown>
       const label = String(f.label ?? '').toLowerCase()
       if (
-        (label.includes('min') && (label.includes('order') || label.includes('qty'))) ||
+        (label.includes('min') &&
+          (label.includes('order') || label.includes('qty') || label.includes('purchase'))) ||
         label.includes('moq')
       ) {
         const v = Number(f.value)
@@ -148,7 +154,7 @@ export function zohoMinOrderQuantity(item: Record<string, unknown> | null, fallb
     }
   }
   const desc = String(item.description ?? '')
-  const m = desc.match(/min\.?\s*(?:order|qty|quantity|cartons?)[:\s]*(\d+)/i)
+  const m = desc.match(/min\.?\s*(?:order|qty|quantity|purchase|cartons?)[:\s]*(\d+)/i)
   if (m) {
     const v = Number(m[1])
     if (Number.isFinite(v) && v > 0) return v
