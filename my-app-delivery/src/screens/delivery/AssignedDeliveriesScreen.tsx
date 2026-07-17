@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { DeliveryMapsLink } from '../../components/DeliveryMapsLink'
 import type { DeliveryStop } from '../../services/deliveryBackendApi'
 import { formatInr } from '../../utils/currency'
 import {
@@ -264,6 +265,11 @@ export function AssignedDeliveriesScreen({
                     </span>
                     <div>
                       <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 600 }}>{stop.address}</p>
+                      {stop.mapsLink ? (
+                        <div style={{ marginTop: 8 }}>
+                          <DeliveryMapsLink mapsLink={stop.mapsLink} compact />
+                        </div>
+                      ) : null}
                       {stop.note ? <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--dd-muted)' }}>{stop.note}</p> : null}
                     </div>
                   </div>

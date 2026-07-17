@@ -46,6 +46,12 @@ export function ProductCard({ product, onOpenProduct, onAddToCart }: Props) {
             <span className="price price--solo">{formatInr(product.priceInr)}</span>
           )}
         </div>
+        {product.minPurchaseCount && product.minPurchaseCount > 1 ? (
+          <p className="product-subtitle" style={{ marginTop: 4 }}>
+            Min order: {product.minPurchaseCount}
+            {product.unit ? ` ${product.unit}` : ''}
+          </p>
+        ) : null}
       </div>
 
       <button

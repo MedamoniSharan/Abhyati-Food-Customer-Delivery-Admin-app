@@ -634,6 +634,56 @@
   text-decoration: underline;
 }
 
+.driver-app .dd-maps-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  text-align: left;
+  cursor: pointer;
+}
+
+.driver-app .dd-maps-link--compact {
+  width: auto;
+  display: inline-flex;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.driver-app .dd-maps-link__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.driver-app .dd-maps-link__label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.driver-app .dd-maps-link__url {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #1e40af;
+  word-break: break-all;
+}
+
+.driver-app .dd-maps-link__chev {
+  color: #64748b;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
 .driver-app .dd-item-row {
   display: flex;
   gap: 12px;
@@ -1222,3 +1272,87 @@
   color: #94a3b8;
   margin-top: 2px;
 }
+
+.driver-app .dd-menu-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 90;
+}
+
+.driver-app .dd-menu-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.driver-app .dd-side-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(280px, 86vw);
+  background: var(--dd-surface);
+  box-shadow: 8px 0 24px rgba(15, 23, 42, 0.12);
+  transform: translateX(-105%);
+  transition: transform 0.22s ease;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
+.driver-app .dd-side-menu.open {
+  transform: translateX(0);
+}
+
+.driver-app .dd-side-menu-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--dd-border);
+}
+
+.driver-app .dd-side-menu-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.driver-app .dd-side-menu-head p {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  color: var(--dd-muted);
+}
+
+.driver-app .dd-side-menu-links {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 4px;
+}
+
+.driver-app .dd-side-menu-links button {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--dd-black);
+  cursor: pointer;
+}
+
+.driver-app .dd-side-menu-links button:hover {
+  background: #f1f5f9;
+}
+
+.driver-app .dd-side-menu-logout {
+  margin-top: 8px;
+  color: #b91c1c !important;
+}
+

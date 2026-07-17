@@ -4,6 +4,8 @@ import { OrderCard } from '../components/OrderCard'
 
 type Props = {
   orders: Order[]
+  loadError?: string | null
+  onRetryLoad?: () => void
   onBackHome: () => void
   onTrackOrder: (order: Order) => void
   onViewDetails: (order: Order) => void
@@ -14,6 +16,8 @@ type Props = {
 
 export function OrdersScreen({
   orders,
+  loadError = null,
+  onRetryLoad,
   onBackHome,
   onTrackOrder,
   onViewDetails,
@@ -50,6 +54,18 @@ export function OrdersScreen({
       </div>
 
       <main className="content orders-content">
+        {loadError ? (
+          <div className="empty-state">
+            <h3>Could not load orders</h3>
+            <p>{loadError}</p>
+            {onRetryLoad ? (
+              <button type="button" className="btn btn-dark block" onClick={onRetryLoad}>
+                Try again
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <>
         <p className="orders-intro">
           {tab === 'active'
             ? 'Track ongoing orders and check what to do next.'
@@ -86,6 +102,8 @@ export function OrdersScreen({
             </p>
           </div>
         ) : null}
+          </>
+        )}
       </main>
     </>
   )

@@ -10,14 +10,16 @@ export function findAssignmentByInvoiceId(invoiceId) {
 }
 
 export async function resolveProofPhotoResponse(assignment) {
-  if (!assignment?.proof) return null
-  const zohoPhoto = await fetchZohoProofPhoto(assignment.invoiceId)
-  if (!zohoPhoto) return null
-  return {
-    data: zohoPhoto.data,
-    contentType: zohoPhoto.contentType,
-    fileName: assignment.proof.fileName || zohoPhoto.fileName
+  const zohoPhoto = await fetchZohoProofPhoto(assignment?.invoiceId)
+  if (zohoPhoto) {
+    return {
+      data: zohoPhoto.data,
+      contentType: zohoPhoto.contentType,
+      fileName: assignment?.proof?.fileName || zohoPhoto.fileName
+    }
   }
+  if (!assignment?.proof) return null
+  return null
 }
 
 export async function resolveProofSignatureResponse(assignment) {
@@ -49,6 +51,6 @@ export function buildProofSummary(assignment) {
 
 export function getAssignmentForProofDownload(assignmentId) {
   const row = getAssignmentById(assignmentId)
-  if (!row?.proof) return null
-  return row
+  if (row) return row
+  return listAssignments().find((a) => String(a.invoiceId) === String(assignmentId)) || null
 }

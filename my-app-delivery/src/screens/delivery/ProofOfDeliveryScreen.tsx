@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import { Capacitor } from '@capacitor/core'
 import type { DeliveryStop } from '../../services/deliveryBackendApi'
 
 const INVOICE_PREVIEW =
@@ -60,7 +62,8 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
   }, [invoicePhoto])
 
   useEffect(() => {
-    if (invoicePhoto) return
+    if (!invoicePhoto) return
+    if (Capacitor.isNativePlatform()) return
     async function requestCameraPermission() {
       if (!navigator.mediaDevices?.getUserMedia) return
       try {
@@ -73,7 +76,67 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
     requestCameraPermission()
   }, [invoicePhoto, onNotify])
 
+  async function uriToFile(uri: string, fileName: string): Promise<File> {
+    const response = await fetch(uri)
+    const blob = await response.blob()
+    return new File([blob], fileName, { type: blob.type || 'image/jpeg' })
+  }
+
+  async function captureFromCamera() {
+    try {
+      const photo = await Camera.getPhoto({
+        source: CameraSource.Camera,
+        resultType: CameraResultType.Uri,
+        quality: 85,
+        allowEditing: false,
+        saveToGallery: false,
+      })
+      const webPath = photo.webPath || photo.path
+      if (!webPath) {
+        onNotify('Could not read camera photo')
+        return
+      }
+      const file = await uriToFile(webPath, `invoice-${Date.now()}.jpg`)
+      setInvoicePhoto(file)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Camera capture failed'
+      if (!/cancel/i.test(message)) onNotify(message)
+    }
+  }
+
+  async function pickFromGallery() {
+    try {
+      const photo = await Camera.getPhoto({
+        source: CameraSource.Photos,
+        resultType: CameraResultType.Uri,
+        quality: 85,
+      })
+      const webPath = photo.webPath || photo.path
+      if (!webPath) {
+        onNotify('Could not read selected photo')
+        return
+      }
+      const file = await uriToFile(webPath, `invoice-${Date.now()}.jpg`)
+      setInvoicePhoto(file)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not open gallery'
+      if (!/cancel/i.test(message)) onNotify(message)
+    }
+  }
+
   function openPhotoPicker() {
+    if (Capacitor.isNativePlatform()) {
+      void captureFromCamera()
+      return
+    }
+    photoInputRef.current?.click()
+  }
+
+  function openGalleryPicker() {
+    if (Capacitor.isNativePlatform()) {
+      void pickFromGallery()
+      return
+    }
     photoInputRef.current?.click()
   }
 
@@ -229,7 +292,7 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
                   </button>
                 </div>
                 <div className="dd-pod-capture-controls">
-                  <button type="button" className="dd-icon-btn dd-pod-overlay-btn" aria-label="Choose from gallery" onClick={openPhotoPicker}>
+                  <button type="button" className="dd-icon-btn dd-pod-overlay-btn" aria-label="Choose from gallery" onClick={openGalleryPicker}>
                     <span className="material-symbols-outlined">image</span>
                   </button>
                   <button type="button" className="dd-pod-shutter" aria-label="Take photo" onClick={openPhotoPicker}>
@@ -239,7 +302,13 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
                     type="button"
                     className="dd-icon-btn dd-pod-overlay-btn"
                     aria-label="Switch camera"
-                    onClick={() => onNotify('Use your device camera when taking the photo')}
+                    onClick={() => {
+                      if (Capacitor.isNativePlatform()) {
+                        void captureFromCamera()
+                      } else {
+                        onNotify('Use your device camera when taking the photo')
+                      }
+                    }}
                   >
                     <span className="material-symbols-outlined">cameraswitch</span>
                   </button>

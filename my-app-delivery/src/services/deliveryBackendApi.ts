@@ -31,6 +31,8 @@ export type DeliveryStop = {
   addressLine1: string
   addressLine2: string
   mapsQuery: string
+  /** Customer-provided Google Maps share link (when set). */
+  mapsLink?: string
   phone: string
   contactLine: string
   arrivalWindow: string
@@ -52,12 +54,85 @@ type DeliveryAssignment = {
   acceptedAt?: string | null
   deliveredAt?: string | null
   updatedAt?: string
+  phone?: string
+  contactLine?: string
+  driverNote?: string
+  arrivalWindow?: string
+  mapsQuery?: string
+  mapsLink?: string
+  addressLine1?: string
+  addressLine2?: string
+  items?: Array<{ name: string; sku: string; qty: number; unit: string; image: string }>
   proof?: {
     fileName?: string
     recipientName?: string
     uploadedAt?: string | null
     zoho?: unknown
   } | null
+}
+
+function mapAssignmentToStop(a: DeliveryAssignment, rowIdx: number): DeliveryStop {
+  const st = String(a.status || '').toLowerCase()
+  const statusTag = st === 'assigned' ? 'Assigned' : st === 'accepted' ? 'Accepted' : st === 'in_transit' ? 'In Transit' : 'Delivered'
+  const hasProof = Boolean(a.proof?.fileName || a.proof?.uploadedAt)
+  const proofNote =
+    statusTag === 'Delivered' && hasProof
+      ? `Receipt saved in Zoho Books${a.proof?.fileName ? ` (${a.proof.fileName})` : ''}`
+      : ''
+  const items = Array.isArray(a.items) ? a.items : []
+  const addressLine1 = a.addressLine1 || a.address || 'Address not available'
+  const addressLine2 = a.addressLine2 || ''
+  const mapsLink = String(a.mapsLink || '').trim()
+  const mapsQuery = a.mapsQuery || mapsLink || a.address || a.customerName || ''
+  const phone = a.phone || ''
+  const contactLine = a.contactLine || (a.customerName ? `Main Contact: ${a.customerName}` : '')
+  const driverNote = a.driverNote || 'Handle package with care.'
+  const podSubtitle =
+    items.length > 0
+      ? `${a.customerName || 'Customer'} • ${items.length} Items`
+      : 'Upload signed invoice photo'
+
+  return {
+    id: a.id,
+    createdAt: a.createdAt ?? null,
+    acceptedAt: a.acceptedAt ?? null,
+    deliveredAt: a.deliveredAt ?? null,
+    updatedAt: a.updatedAt ?? null,
+    salesorder_id: a.invoiceId,
+    deliveryNumber: `INV-${rowIdx + 1}`,
+    businessName: a.customerName || 'Customer',
+    orderId: a.invoiceNumber || a.invoiceId,
+    amount: Number(a.amount) || 0,
+    paymentLabel: 'Credit',
+    statusTag,
+    timeLabel: formatStopTimeLabel(a, statusTag),
+    isNext: false,
+    address: a.address || [addressLine1, addressLine2].filter(Boolean).join(', ') || 'Address not available',
+    note: proofNote,
+    proofUploaded: hasProof,
+    proofFileName: a.proof?.fileName || '',
+    contactName: a.customerName || 'Customer',
+    contactRole: 'Invoice recipient',
+    initials: String(a.customerName || 'C')
+      .split(' ')
+      .slice(0, 2)
+      .map((s) => s[0] || '')
+      .join('')
+      .toUpperCase(),
+    customerName: a.customerName || 'Customer',
+    verified: st === 'delivered',
+    addressLine1,
+    addressLine2,
+    mapsQuery,
+    ...(mapsLink ? { mapsLink } : {}),
+    phone,
+    contactLine,
+    arrivalWindow: a.arrivalWindow || 'Today',
+    driverNote,
+    podOrderLabel: a.invoiceNumber || a.invoiceId,
+    podSubtitle,
+    items,
+  }
 }
 
 async function request<T>(path: string): Promise<T> {
@@ -153,55 +228,7 @@ export async function getDeliveryStops(): Promise<DeliveryStop[]> {
     if (ra !== rb) return ra - rb
     return String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
   })
-  const mapped = rows.map((a, rowIdx) => {
-    const st = String(a.status || '').toLowerCase()
-    const statusTag = st === 'assigned' ? 'Assigned' : st === 'accepted' ? 'Accepted' : st === 'in_transit' ? 'In Transit' : 'Delivered'
-    const hasProof = Boolean(a.proof?.fileName || a.proof?.uploadedAt)
-    const proofNote =
-      statusTag === 'Delivered' && hasProof
-        ? `Receipt saved in Zoho Books${a.proof?.fileName ? ` (${a.proof.fileName})` : ''}`
-        : ''
-    return {
-      id: a.id,
-      createdAt: a.createdAt ?? null,
-      acceptedAt: a.acceptedAt ?? null,
-      deliveredAt: a.deliveredAt ?? null,
-      updatedAt: a.updatedAt ?? null,
-      salesorder_id: a.invoiceId,
-      deliveryNumber: `INV-${rowIdx + 1}`,
-      businessName: a.customerName || 'Customer',
-      orderId: a.invoiceNumber || a.invoiceId,
-      amount: Number(a.amount) || 0,
-      paymentLabel: 'Credit',
-      statusTag,
-      timeLabel: formatStopTimeLabel(a, statusTag),
-      isNext: false,
-      address: a.address || 'Address not available',
-      note: proofNote,
-      proofUploaded: hasProof,
-      proofFileName: a.proof?.fileName || '',
-      contactName: a.customerName || 'Customer',
-      contactRole: 'Invoice recipient',
-      initials: String(a.customerName || 'C')
-        .split(' ')
-        .slice(0, 2)
-        .map((s) => s[0] || '')
-        .join('')
-        .toUpperCase(),
-      customerName: a.customerName || 'Customer',
-      verified: st === 'delivered',
-      addressLine1: a.address || '',
-      addressLine2: '',
-      mapsQuery: a.address || a.customerName || '',
-      phone: '',
-      contactLine: '',
-      arrivalWindow: '',
-      driverNote: '',
-      podOrderLabel: a.invoiceNumber || a.invoiceId,
-      podSubtitle: 'Upload signed invoice photo',
-      items: []
-    } as DeliveryStop
-  })
+  const mapped = rows.map((a, rowIdx) => mapAssignmentToStop(a, rowIdx))
   let nextAssigned = false
   return mapped.map((stop) => {
     if (stop.statusTag === 'Delivered') return { ...stop, isNext: false }
@@ -214,8 +241,17 @@ export async function getDeliveryStops(): Promise<DeliveryStop[]> {
 }
 
 export async function getDeliveryStopDetail(stopId: string): Promise<DeliveryStop | null> {
-  const all = await getDeliveryStops()
-  return all.find((s) => s.id === stopId) || null
+  try {
+    const response = await request<{ assignment?: DeliveryAssignment }>(
+      `/api/delivery/assignments/${encodeURIComponent(stopId)}`
+    )
+    const a = response.assignment
+    if (!a) return null
+    return mapAssignmentToStop(a, 0)
+  } catch {
+    const all = await getDeliveryStops()
+    return all.find((s) => s.id === stopId) || null
+  }
 }
 
 export async function confirmDeliveryStop(

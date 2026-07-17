@@ -7,6 +7,8 @@ export type AuthUser = {
   mobile?: string
   /** Billing/shipping address formatted from Zoho Books contact */
   deliveryAddress?: string
+  /** Google Maps share link saved on the Zoho contact (optional). */
+  mapsLink?: string
 }
 
 const API_BASE_URL_CANDIDATES = getApiBaseCandidates()
@@ -134,6 +136,7 @@ export type SignupPayload = {
   password: string
   mobile: string
   deliveryAddress?: string
+  mapsLink?: string
 }
 
 export async function signupCustomer(payload: SignupPayload): Promise<LoginResponse> {
@@ -145,6 +148,8 @@ export async function signupCustomer(payload: SignupPayload): Promise<LoginRespo
   }
   const deliveryAddress = payload.deliveryAddress?.trim()
   if (deliveryAddress) body.deliveryAddress = deliveryAddress
+  const mapsLink = payload.mapsLink?.trim()
+  if (mapsLink) body.mapsLink = mapsLink
   return authRequest('/api/auth/signup', body)
 }
 
@@ -172,6 +177,7 @@ export type CustomerProfilePatch = {
   email: string
   mobile: string
   deliveryAddress: string
+  mapsLink?: string
   password?: string
   currentPassword?: string
 }

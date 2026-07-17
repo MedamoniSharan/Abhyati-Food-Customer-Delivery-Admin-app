@@ -13,6 +13,10 @@ import {
   updateAssignment
 } from '../services/deliveryAssignmentStore.js'
 import { resolveAssignmentsForDriver } from '../services/deliveryAssignmentResolve.js'
+import {
+  hydrateAssignmentFromInvoice,
+  hydrateAssignmentsFromInvoices
+} from '../services/deliveryAssignmentHydrate.js'
 import { upsertInvoiceAssignmentNote } from '../services/zohoDeliveryAssignmentNotes.js'
 import { signDriverToken } from '../services/jwtService.js'
 import { uploadFullDeliveryProofToZoho } from '../services/zohoDeliveryProofService.js'
@@ -83,7 +87,33 @@ deliveryAuthRoutes.use(requireDriver)
 deliveryAuthRoutes.get('/assignments', async (req, res, next) => {
   try {
     const assignments = await resolveAssignmentsForDriver(req.driver.email)
-    res.json({ assignments })
+    const hydrated = await hydrateAssignmentsFromInvoices(assignments)
+    res.json({ assignments: hydrated })
+  } catch (error) {
+    next(error)
+  }
+})
+
+deliveryAuthRoutes.get('/assignments/:id', async (req, res, next) => {
+  try {
+    const id = z.string().min(1).parse(req.params.id)
+    let row = getAssignmentById(id)
+    if (!row) {
+      const all = await resolveAssignmentsForDriver(req.driver.email)
+      row = all.find((a) => String(a.id) === id) || null
+    }
+    if (!row) {
+      const err = new Error('Assignment not found')
+      err.statusCode = 404
+      throw err
+    }
+    if (row.driverEmail !== req.driver.email) {
+      const err = new Error('Not allowed')
+      err.statusCode = 403
+      throw err
+    }
+    const assignment = await hydrateAssignmentFromInvoice(row)
+    res.json({ assignment })
   } catch (error) {
     next(error)
   }

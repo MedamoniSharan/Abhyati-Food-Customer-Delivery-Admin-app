@@ -2,7 +2,7 @@ import type { Order, Product } from '../types/app'
 import { getApiBaseCandidates, logApiCandidatesOnce } from '../config/api'
 import { readAuthToken } from '../utils/authSession'
 import { FALLBACK_PRODUCT_IMAGE } from '../utils/productImage'
-import { zohoAvailableStockQuantity } from '../utils/productDetailFromZoho'
+import { zohoAvailableStockQuantity, zohoMinOrderQuantity } from '../utils/productDetailFromZoho'
 
 const API_BASE_URL_CANDIDATES = getApiBaseCandidates()
 
@@ -66,7 +66,11 @@ function zohoItemCategory(item: ZohoItem): string {
 
 function mapZohoItemToProduct(item: ZohoItem, index: number): Product {
   const itemId = item.item_id?.trim()
-  const avail = zohoAvailableStockQuantity(item as unknown as Record<string, unknown>)
+  const row = item as unknown as Record<string, unknown>
+  const avail = zohoAvailableStockQuantity(row)
+  const minPurchaseCount = zohoMinOrderQuantity(row, 1)
+  const unitRaw = row.unit
+  const unit = typeof unitRaw === 'string' && unitRaw.trim() ? unitRaw.trim() : undefined
   return {
     id: itemId ?? `zoho-${index}`,
     zohoItemId: itemId,
@@ -76,6 +80,8 @@ function mapZohoItemToProduct(item: ZohoItem, index: number): Product {
     image: FALLBACK_PRODUCT_IMAGE,
     category: zohoItemCategory(item),
     ...(avail != null ? { availableStock: avail } : {}),
+    ...(minPurchaseCount > 1 ? { minPurchaseCount } : {}),
+    ...(unit ? { unit } : {}),
   }
 }
 
@@ -234,13 +240,22 @@ export async function fetchCustomerInvoice(invoiceId: string): Promise<Record<st
   }
 }
 
-export async function getBackendOrders(): Promise<Order[]> {
+export type OrdersFetchResult = {
+  orders: Order[]
+  error: string | null
+}
+
+export async function getBackendOrders(): Promise<OrdersFetchResult> {
   try {
     const response = await request<{ orders?: ZohoSalesOrder[] }>('/api/customer/orders?per_page=200')
     const salesOrders = Array.isArray(response.orders) ? response.orders : []
-    return salesOrders.map((row, i) => mapZohoSalesOrderToOrder(row, i))
-  } catch {
-    return []
+    return {
+      orders: salesOrders.map((row, i) => mapZohoSalesOrderToOrder(row, i)),
+      error: null,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not load orders'
+    return { orders: [], error: message }
   }
 }
 

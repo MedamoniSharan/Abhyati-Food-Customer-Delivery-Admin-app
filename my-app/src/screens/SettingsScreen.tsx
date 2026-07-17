@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { AuthUser } from '../services/authApi'
 import { fetchAuthMe, patchCustomerProfile } from '../services/authApi'
 import { readAuthToken } from '../utils/authSession'
+import { isGoogleMapsUrl } from '../utils/mapsLink'
 
 type Props = {
   user: AuthUser | null
@@ -16,6 +17,7 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
   const [baselineEmail, setBaselineEmail] = useState(user?.email ?? '')
   const [mobile, setMobile] = useState(user?.mobile ?? '')
   const [deliveryAddress, setDeliveryAddress] = useState(user?.deliveryAddress ?? '')
+  const [mapsLink, setMapsLink] = useState(user?.mapsLink ?? '')
   const [newPassword, setNewPassword] = useState('')
   const [currentPassword, setCurrentPassword] = useState('')
   const [showNewPw, setShowNewPw] = useState(false)
@@ -37,6 +39,7 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
       setBaselineEmail(fresh.email)
       setMobile(fresh.mobile ?? '')
       setDeliveryAddress(fresh.deliveryAddress ?? '')
+      setMapsLink(fresh.mapsLink ?? '')
       setBoot(false)
     })
     return () => {
@@ -62,6 +65,11 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
       onNotify('New password must be at least 6 characters.', 'warning')
       return
     }
+    const mapsTrim = mapsLink.trim()
+    if (mapsTrim && !isGoogleMapsUrl(mapsTrim)) {
+      onNotify('Enter a valid Google Maps link (maps.app.goo.gl or google.com/maps/...).', 'warning')
+      return
+    }
 
     setLoading(true)
     try {
@@ -70,13 +78,15 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
         email: string
         mobile: string
         deliveryAddress: string
+        mapsLink?: string
         password?: string
         currentPassword?: string
       } = {
         fullName: fullName.trim(),
         email: email.trim(),
         mobile: mobile.trim(),
-        deliveryAddress: deliveryAddress.trim()
+        deliveryAddress: deliveryAddress.trim(),
+        mapsLink: mapsTrim
       }
       if (passwordChange) {
         patch.password = newPassword.trim()
@@ -166,6 +176,23 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
             />
             <p className="muted-pad" style={{ marginTop: -4, marginBottom: 12 }}>
               Saved to your Zoho Books billing address for deliveries.
+            </p>
+
+            <label className="settings-label" htmlFor="cust-maps-link">
+              Google Maps link (optional)
+            </label>
+            <input
+              id="cust-maps-link"
+              className="auth-input"
+              type="url"
+              inputMode="url"
+              value={mapsLink}
+              onChange={(e) => setMapsLink(e.target.value)}
+              placeholder="https://maps.app.goo.gl/… or google.com/maps/…"
+              autoComplete="off"
+            />
+            <p className="muted-pad" style={{ marginTop: -4, marginBottom: 12 }}>
+              Paste a share link from Google Maps. Drivers see this on assigned deliveries after you place an order.
             </p>
 
             <h3 className="settings-sub">Change password</h3>

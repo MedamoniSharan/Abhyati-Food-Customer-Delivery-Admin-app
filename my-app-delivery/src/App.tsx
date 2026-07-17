@@ -101,16 +101,11 @@ function App() {
     touchSessionActivity()
 
     const onActivity = () => touchSessionActivity()
-    const events: Array<keyof WindowEventMap> = [
-      'pointerdown',
-      'keydown',
-      'touchstart',
-      'scroll',
-      'visibilitychange',
-    ]
+    const events: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'scroll']
     for (const ev of events) {
       window.addEventListener(ev, onActivity, { passive: true })
     }
+    document.addEventListener('visibilitychange', onActivity)
 
     const tick = () => {
       if (!signedInRef.current) return
@@ -121,6 +116,7 @@ function App() {
 
     return () => {
       for (const ev of events) window.removeEventListener(ev, onActivity)
+      document.removeEventListener('visibilitychange', onActivity)
       window.clearInterval(intervalId)
       window.removeEventListener('focus', tick)
     }

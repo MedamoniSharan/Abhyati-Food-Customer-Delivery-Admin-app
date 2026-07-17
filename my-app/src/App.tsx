@@ -31,6 +31,7 @@ function App() {
   const [serverCategoryNames, setServerCategoryNames] = useState<string[]>([])
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([])
   const [orderHistory, setOrderHistory] = useState<Order[]>([])
+  const [ordersLoadError, setOrdersLoadError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -43,6 +44,7 @@ function App() {
   const [loadingCatalog, setLoadingCatalog] = useState(readSignedIn)
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null)
   const catalogFetchLock = useRef(false)
+  const catalogFetchGeneration = useRef(0)
 
   useEffect(() => {
     document.body.dataset.toastLayout = isAuthenticated ? 'main' : 'auth'
@@ -117,7 +119,9 @@ function App() {
 
   const refreshOrderHistory = useCallback(async () => {
     if (!readAuthToken()) return
-    setOrderHistory(await getBackendOrders())
+    const { orders, error } = await getBackendOrders()
+    setOrderHistory(orders)
+    setOrdersLoadError(error)
   }, [])
 
   const handlePullRefresh = useCallback(async () => {
@@ -177,12 +181,14 @@ function App() {
 
   const loadCatalogPage = useCallback(async () => {
     if (catalogFetchLock.current || !hasMoreCatalogItems) return
+    const generation = catalogFetchGeneration.current
     catalogFetchLock.current = true
     setLoadingCatalog(true)
     try {
       const page = nextItemsPage
       const catOpt = selectedCategory === 'All Items' ? undefined : selectedCategory
       const { products, hasMore } = await fetchZohoItemsPage(page, 20, { categoryName: catOpt })
+      if (generation !== catalogFetchGeneration.current) return
       setCatalogProducts((prev) => {
         const merged = mergeDedupeProducts(prev, products)
         if (merged.length > 0) {
@@ -197,16 +203,21 @@ function App() {
       setHasMoreCatalogItems(hasMore)
       setNextItemsPage(page + 1)
     } catch {
-      showToast('Unable to load products. Try again.', { variant: 'error' })
+      if (generation === catalogFetchGeneration.current) {
+        showToast('Unable to load products. Try again.', { variant: 'error' })
+      }
     } finally {
-      catalogFetchLock.current = false
-      setLoadingCatalog(false)
+      if (generation === catalogFetchGeneration.current) {
+        catalogFetchLock.current = false
+        setLoadingCatalog(false)
+      }
     }
   }, [hasMoreCatalogItems, mergeDedupeProducts, nextItemsPage, selectedCategory, showToast])
 
   /** Zoho Books items require a customer JWT. Reload when sign-in or category filter changes. */
   useEffect(() => {
     if (!isAuthenticated) return
+    const generation = ++catalogFetchGeneration.current
     let cancelled = false
     catalogFetchLock.current = true
     setLoadingCatalog(true)
@@ -217,7 +228,7 @@ function App() {
     void (async () => {
       try {
         const { products: firstPage, hasMore } = await fetchZohoItemsPage(1, 20, { categoryName: catOpt })
-        if (cancelled) return
+        if (cancelled || generation !== catalogFetchGeneration.current) return
         setCatalogProducts(firstPage)
         setHasMoreCatalogItems(hasMore)
         setNextItemsPage(2)
@@ -229,15 +240,17 @@ function App() {
           setSelectedProduct(null)
         }
       } catch {
-        if (!cancelled) {
+        if (!cancelled && generation === catalogFetchGeneration.current) {
           showToast('Unable to load products. Check your connection and try again.', { variant: 'error' })
           setCatalogProducts([])
           setSelectedProduct(null)
           setHasMoreCatalogItems(false)
         }
       } finally {
-        catalogFetchLock.current = false
-        if (!cancelled) setLoadingCatalog(false)
+        if (!cancelled && generation === catalogFetchGeneration.current) {
+          catalogFetchLock.current = false
+          setLoadingCatalog(false)
+        }
       }
     })()
     return () => {
@@ -273,10 +286,13 @@ function App() {
 
   const visibleProducts = useMemo(() => {
     const catalogHasZohoItems = catalogProducts.some((p) => p.zohoItemId)
+    const serverFiltered = selectedCategory !== 'All Items'
     return catalogProducts.filter((product) => {
       if (catalogHasZohoItems && !product.zohoItemId) return false
-      const matchCategory =
-        selectedCategory === 'All Items' || product.category.toLowerCase() === selectedCategory.toLowerCase()
+      const matchCategory = serverFiltered
+        ? true
+        : selectedCategory === 'All Items' ||
+          product.category.toLowerCase() === String(selectedCategory).toLowerCase()
       const term = searchQuery.trim().toLowerCase()
       const matchQuery =
         term.length === 0 ||
@@ -288,10 +304,10 @@ function App() {
   }, [catalogProducts, searchQuery, selectedCategory])
 
   const catalogCategories = useMemo(() => {
-    const names = new Set<string>()
-    for (const n of serverCategoryNames) {
-      if (n) names.add(n)
+    if (serverCategoryNames.length > 0) {
+      return ['All Items', ...serverCategoryNames.slice().sort((a, b) => a.localeCompare(b))]
     }
+    const names = new Set<string>()
     for (const p of catalogProducts) {
       const c = p.category?.trim()
       if (c) names.add(c)
@@ -311,7 +327,11 @@ function App() {
     }
   }, [screen, selectedProduct])
 
-  function addToCart(product: Product, quantity = 1) {
+  function defaultAddQuantity(product: Product): number {
+    return product.minPurchaseCount ?? 1
+  }
+
+  function addToCart(product: Product, quantity = defaultAddQuantity(product)) {
     const cap = product.availableStock
     if (cap != null) {
       const existing = cartItems.find((item) => item.product.id === product.id)
@@ -345,15 +365,20 @@ function App() {
     const line = cartItems.find((item) => item.product.id === productId)
     if (!line) return
     const cap = line.product.availableStock
+    const minQty = line.product.minPurchaseCount ?? 1
     if (type === 'increase' && cap != null && line.quantity + 1 > cap) {
       showToast(`Available stock is ${cap}. You can only order up to that amount.`, { variant: 'warning' })
+      return
+    }
+    if (type === 'decrease' && line.quantity <= minQty) {
+      showToast(`Minimum order is ${minQty}${line.product.unit ? ` ${line.product.unit}` : ''}.`, { variant: 'warning' })
       return
     }
     setCartItems((current) =>
       current
         .map((item) => {
           if (item.product.id !== productId) return item
-          const nextQty = type === 'increase' ? item.quantity + 1 : item.quantity - 1
+          const nextQty = type === 'increase' ? item.quantity + 1 : Math.max(minQty, item.quantity - 1)
           return { ...item, quantity: nextQty }
         })
         .filter((item) => item.quantity > 0),
@@ -379,7 +404,7 @@ function App() {
   function handleQuickAddFromOrder(order: Order) {
     const match = matchOrderToProduct(order, catalogProducts)
     if (!match) return
-    addToCart(match, 1)
+    addToCart(match, defaultAddQuantity(match))
     setScreen('cart')
   }
 
@@ -438,15 +463,31 @@ function App() {
         currency: rzpOrder.currency,
         user: freshUser
       })
-      await verifyRazorpayPayment({
-        razorpay_order_id: paymentResult.razorpay_order_id,
-        razorpay_payment_id: paymentResult.razorpay_payment_id,
-        razorpay_signature: paymentResult.razorpay_signature
-      })
       setCartItems([])
-      await refreshOrderHistory()
-      setScreen('orders')
-      showToast('Payment successful. Order placed and synced to admin.', { variant: 'success' })
+      try {
+        await verifyRazorpayPayment({
+          razorpay_order_id: paymentResult.razorpay_order_id,
+          razorpay_payment_id: paymentResult.razorpay_payment_id,
+          razorpay_signature: paymentResult.razorpay_signature
+        })
+        await refreshOrderHistory()
+        setScreen('orders')
+        showToast('Payment successful. Order placed and synced to admin.', { variant: 'success' })
+      } catch (verifyError) {
+        await refreshOrderHistory()
+        const verifyMessage =
+          verifyError instanceof Error ? verifyError.message : 'Payment verification failed'
+        if (verifyMessage.toLowerCase().includes('already processed')) {
+          setScreen('orders')
+          showToast('Payment successful. Order placed and synced to admin.', { variant: 'success' })
+        } else {
+          showToast(
+            `${verifyMessage}. Your payment may have succeeded — check Orders or contact support.`,
+            { variant: 'warning' },
+          )
+        }
+      }
+      return
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Checkout failed. Please try again.'
       if (message !== 'Payment cancelled') {
@@ -469,7 +510,7 @@ function App() {
           onCategoryChange={setSelectedCategory}
           onQueryChange={setSearchQuery}
           onOpenProduct={openProduct}
-          onAddToCart={(product) => addToCart(product, 1)}
+          onAddToCart={(product) => addToCart(product, defaultAddQuantity(product))}
           isMenuOpen={isMenuOpen}
           onToggleMenu={() => setIsMenuOpen((prev) => !prev)}
           onCloseMenu={() => setIsMenuOpen(false)}
@@ -511,6 +552,8 @@ function App() {
       return (
         <OrdersScreen
           orders={orderHistory}
+          loadError={ordersLoadError}
+          onRetryLoad={() => void refreshOrderHistory()}
           onBackHome={() => {
             setSelectedOrder(null)
             setScreen('home')

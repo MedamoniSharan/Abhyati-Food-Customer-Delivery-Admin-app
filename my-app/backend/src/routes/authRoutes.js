@@ -10,6 +10,15 @@ import {
 } from '../services/authStore.js'
 import { signCustomerToken, verifyCustomerToken } from '../services/jwtService.js'
 import { getActiveTierForContact, isCustomerPricingConfigured } from '../services/customerPricingZohoService.js'
+import { isGoogleMapsUrl } from '../util/customerMapsLink.js'
+
+const mapsLinkField = z
+  .string()
+  .max(500)
+  .optional()
+  .refine((v) => !v || !String(v).trim() || isGoogleMapsUrl(String(v).trim()), {
+    message: 'Enter a valid Google Maps link (for example maps.app.goo.gl or google.com/maps/...)'
+  })
 
 const loginSchema = z.object({
   email: z.string().email('Valid email is required'),
@@ -26,7 +35,8 @@ const signupSchema = z.object({
     .min(8, 'Mobile number is required')
     .max(50, 'Mobile number is too long')
     .refine((v) => /\d/.test(v), { message: 'Enter a valid mobile number' }),
-  deliveryAddress: z.string().max(2000).optional()
+  deliveryAddress: z.string().max(2000).optional(),
+  mapsLink: mapsLinkField
 })
 
 const profilePatchSchema = z.object({
@@ -35,7 +45,8 @@ const profilePatchSchema = z.object({
   email: z.string().email().max(254).optional(),
   password: z.string().min(6).max(128).optional(),
   currentPassword: z.string().min(1).max(200).optional(),
-  deliveryAddress: z.string().max(2000).optional()
+  deliveryAddress: z.string().max(2000).optional(),
+  mapsLink: mapsLinkField
 })
 
 function normEmail(e) {
@@ -123,6 +134,7 @@ authRoutes.patch('/profile', requireCustomer, requireActiveCustomer, async (req,
     if (body.email !== undefined) updates.email = body.email
     if (body.password) updates.password = body.password
     if (body.deliveryAddress !== undefined) updates.deliveryAddress = body.deliveryAddress
+    if (body.mapsLink !== undefined) updates.mapsLink = body.mapsLink
 
     if (Object.keys(updates).length === 0) {
       const user = await getCustomerUserByEmail(tokenEmail)

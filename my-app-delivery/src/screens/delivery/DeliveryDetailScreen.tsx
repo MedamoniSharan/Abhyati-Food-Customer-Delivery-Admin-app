@@ -1,4 +1,5 @@
 import { DeliveryGoogleMap } from '../../components/DeliveryGoogleMap'
+import { DeliveryMapsLink } from '../../components/DeliveryMapsLink'
 import type { DeliveryStop } from '../../services/deliveryBackendApi'
 
 type Props = {
@@ -92,6 +93,12 @@ export function DeliveryDetailScreen({
                 </span>
               </div>
             </button>
+            {detail.mapsLink ? (
+              <>
+                <div style={{ height: 1, background: 'var(--dd-border)' }} />
+                <DeliveryMapsLink mapsLink={detail.mapsLink} onOpen={onOpenAddress} />
+              </>
+            ) : null}
             <div style={{ height: 1, background: 'var(--dd-border)' }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', gap: 12 }}>

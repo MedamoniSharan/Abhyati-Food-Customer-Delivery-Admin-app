@@ -1,4 +1,5 @@
 import { DeliveryGoogleMap } from '../../components/DeliveryGoogleMap'
+import { DeliveryMapsLink } from '../../components/DeliveryMapsLink'
 import { NotificationsBell } from '../../contexts/NotificationsContext'
 import type { DeliveryStop } from '../../services/deliveryBackendApi'
 import { formatInr } from '../../utils/currency'
@@ -16,7 +17,7 @@ type Props = {
   onViewAllDeliveries: () => void
   onViewPendingDeliveries: () => void
   onViewCompletedDeliveries: () => void
-  onNotify: (message: string) => void
+  onOpenMenu: () => void
 }
 
 export function DeliveryDashboardScreen({
@@ -30,14 +31,14 @@ export function DeliveryDashboardScreen({
   onViewAllDeliveries,
   onViewPendingDeliveries,
   onViewCompletedDeliveries,
-  onNotify,
+  onOpenMenu,
 }: Props) {
   const pendingStops = Math.max(totalStops - completedStops, 0)
   return (
     <>
       <header className="dd-header">
         <div className="dd-header-row">
-          <button type="button" className="dd-icon-btn" aria-label="Menu" onClick={() => onNotify('Menu coming soon')}>
+          <button type="button" className="dd-icon-btn" aria-label="Menu" onClick={onOpenMenu}>
             <span className="material-symbols-outlined">menu</span>
           </button>
           <h1>Dashboard</h1>
@@ -137,6 +138,11 @@ export function DeliveryDashboardScreen({
                   </span>
                   {currentStop?.address || 'No address available'}
                 </div>
+                {currentStop?.mapsLink ? (
+                  <div style={{ marginTop: 10 }}>
+                    <DeliveryMapsLink mapsLink={currentStop.mapsLink} onOpen={onStartNavigation} compact />
+                  </div>
+                ) : null}
               </div>
               <button type="button" className="dd-icon-btn dd-card" aria-label="Call customer" onClick={onCallCurrent} disabled={!currentStop?.phone}>
                 <span className="material-symbols-outlined">call</span>

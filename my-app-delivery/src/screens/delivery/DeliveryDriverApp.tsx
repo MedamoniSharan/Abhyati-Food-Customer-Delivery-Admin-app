@@ -15,6 +15,7 @@ import { DeliveryBottomNav, type DriverTab } from './DeliveryBottomNav'
 import { DeliveryDashboardScreen } from './DeliveryDashboardScreen'
 import { DeliveryDetailScreen } from './DeliveryDetailScreen'
 import { ProofOfDeliveryScreen } from './ProofOfDeliveryScreen'
+import { DeliverySideMenu } from './DeliverySideMenu'
 import { DriverProfileSettings } from './DriverProfileSettings'
 
 type Props = {
@@ -38,6 +39,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
   const [scannerOpen, setScannerOpen] = useState(false)
   const [scannerError, setScannerError] = useState<string | null>(null)
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
   const scannerVideoRef = useRef<HTMLVideoElement>(null)
   const scannerStreamRef = useRef<MediaStream | null>(null)
   const prevTabRef = useRef<DriverTab>(tab)
@@ -416,7 +418,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
               setDeliveriesFilter('completed')
               setTab('deliveries')
             }}
-            onNotify={onNotify}
+            onOpenMenu={() => setMenuOpen(true)}
           />
         ) : null}
         {tab === 'deliveries' ? (
@@ -488,6 +490,17 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
         ) : null}
         </PullToRefresh>
       </div>
+      <DeliverySideMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onNavigate={(nextTab) => {
+          setDetailStopId(null)
+          setPodStopId(null)
+          setRouteMapQuery(null)
+          setTab(nextTab)
+        }}
+        onLogout={onLogout}
+      />
       <DeliveryBottomNav active={tab} onChange={handleTabChange} onScan={openScanner} />
 
       {scannerOpen ? (

@@ -17,6 +17,21 @@ type Page =
   | 'products'
   | 'deliveries'
   | 'assignments'
+  | 'payments'
+
+type PaymentRecordRow = {
+  id?: string
+  razorpayOrderId?: string
+  razorpayPaymentId?: string | null
+  customerEmail?: string
+  invoiceId?: string | null
+  invoiceNumber?: string | null
+  amountInr?: number
+  status?: string
+  createdAt?: string
+  paidAt?: string | null
+  referenceNumber?: string
+}
 
 type ZohoContactPerson = { email?: string; is_primary_contact?: boolean }
 type ZohoContactRow = {
@@ -149,6 +164,8 @@ function adminPageLoadingPhrase(p: Page): string {
       return 'Loading orders and delivery…'
     case 'assignments':
       return 'Loading assignments…'
+    case 'payments':
+      return 'Loading payments…'
     default:
       return 'Loading…'
   }
@@ -404,6 +421,9 @@ export default function App() {
   const [assignmentsRefreshing, setAssignmentsRefreshing] = useState(false)
   const [assignmentsSortAsc, setAssignmentsSortAsc] = useState(false)
   const [assignmentsPage, setAssignmentsPage] = useState(1)
+  const [paymentsRaw, setPaymentsRaw] = useState<PaymentRecordRow[]>([])
+  const [paymentsRefreshing, setPaymentsRefreshing] = useState(false)
+  const [paymentsPage, setPaymentsPage] = useState(1)
 
   const refreshPricingTiers = useCallback(async () => {
     setPricingTiersLoading(true)
@@ -526,6 +546,16 @@ export default function App() {
     }
   }, [])
 
+  const refreshPayments = useCallback(async () => {
+    setPaymentsRefreshing(true)
+    try {
+      const data = await adminFetch<{ payments?: PaymentRecordRow[] }>('/api/admin/payments')
+      setPaymentsRaw(Array.isArray(data.payments) ? data.payments : [])
+    } finally {
+      setPaymentsRefreshing(false)
+    }
+  }, [])
+
   const refreshZohoContacts = useCallback(async () => {
     setZohoCustomersLoading(true)
     try {
@@ -550,6 +580,9 @@ export default function App() {
       if (page === 'assignments') {
         await refreshAssignments()
       }
+      if (page === 'payments') {
+        await refreshPayments()
+      }
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : 'Failed to load')
       if (String(e).includes('401') || String(e).includes('Invalid')) {
@@ -565,6 +598,7 @@ export default function App() {
     refreshDrivers,
     refreshInvoices,
     refreshAssignments,
+    refreshPayments,
     refreshZohoContacts
   ])
 
@@ -970,6 +1004,10 @@ export default function App() {
     () => paginateRows(sortedAssignments, assignmentsPage, TABLE_PAGE_SIZE),
     [sortedAssignments, assignmentsPage]
   )
+  const paymentsPaged = useMemo(
+    () => paginateRows(paymentsRaw, paymentsPage, TABLE_PAGE_SIZE),
+    [paymentsRaw, paymentsPage]
+  )
   const assignmentsByInvoiceId = useMemo(() => {
     const map = new Map<string, DeliveryAssignmentRow>()
     for (const row of assignmentsRaw) {
@@ -1059,6 +1097,7 @@ export default function App() {
               ['pricing-categories', 'Customer category', 'tags'],
               ['drivers', 'Deliverers', 'drivers'],
               ['deliveries', 'Orders', 'orders'],
+              ['payments', 'Payments', 'orders'],
               ['assignments', 'Assignments', 'assignments']
             ] as const
           ).map(([id, label, icon]) => (
@@ -1091,6 +1130,7 @@ export default function App() {
               'pricing-categories': 'Customer category',
               drivers: 'Deliverers',
               deliveries: 'Orders',
+              payments: 'Payments',
               assignments: 'Assignments'
             }[page]}
           </strong>
@@ -2446,6 +2486,79 @@ export default function App() {
               assignmentsRefreshing={assignmentsRefreshing}
               onToast={toast}
             />
+          ) : null}
+
+          {page === 'payments' ? (
+            <>
+              <div className="admin-products-header" style={{ justifyContent: 'space-between' }}>
+                <p style={{ margin: 0, color: 'var(--admin-muted)', fontSize: '0.875rem' }}>
+                  Razorpay checkout sessions (pending, paid, and failed).
+                </p>
+                <button
+                  type="button"
+                  className="admin-btn admin-btn-inline"
+                  disabled={paymentsRefreshing}
+                  onClick={() => void refreshPayments()}
+                >
+                  {paymentsRefreshing ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
+              <section className="admin-card">
+                <div className="admin-table-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Status</th>
+                        <th>Customer</th>
+                        <th>Amount</th>
+                        <th>Razorpay order</th>
+                        <th>Payment ID</th>
+                        <th>Invoice</th>
+                        <th>Created</th>
+                        <th>Paid at</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paymentsPaged.pageRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} style={{ color: 'var(--admin-muted)' }}>
+                            No payment records yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        paymentsPaged.pageRows.map((row) => (
+                          <tr key={row.id || row.razorpayOrderId}>
+                            <td>{row.status || '—'}</td>
+                            <td>{row.customerEmail || '—'}</td>
+                            <td>{formatMoneyInr(Number(row.amountInr) || 0)}</td>
+                            <td>{row.razorpayOrderId || '—'}</td>
+                            <td>{row.razorpayPaymentId || '—'}</td>
+                            <td>{row.invoiceNumber || row.invoiceId || '—'}</td>
+                            <td>{formatPaidAt(row.createdAt)}</td>
+                            <td>{formatPaidAt(row.paidAt)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="admin-table-pagination">
+                  <button className="admin-btn admin-btn--ghost" type="button" onClick={() => setPaymentsPage((p) => Math.max(1, p - 1))}>
+                    Prev
+                  </button>
+                  <span>
+                    Page {paymentsPaged.safePage} / {paymentsPaged.totalPages}
+                  </span>
+                  <button
+                    className="admin-btn admin-btn--ghost"
+                    type="button"
+                    onClick={() => setPaymentsPage((p) => Math.min(paymentsPaged.totalPages, p + 1))}
+                  >
+                    Next
+                  </button>
+                </div>
+              </section>
+            </>
           ) : null}
 
           {page === 'products' ? <ProductsSection /> : null}

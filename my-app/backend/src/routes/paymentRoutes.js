@@ -155,10 +155,12 @@ paymentRoutes.post('/razorpay/verify', async (req, res, next) => {
     }
 
     const resolvedLines = record.lineItems || []
+    const { deliveryAddressBlock } = await resolveCustomerContactForCheckout(req.customer)
     const { invoice, salesorder } = await createZohoOrderAndInvoice({
       customerId: record.customerId,
       resolvedLines,
-      referenceNumber: record.referenceNumber || `rzp_${body.razorpay_payment_id}`
+      referenceNumber: record.referenceNumber || `rzp_${body.razorpay_payment_id}`,
+      deliveryAddressBlock
     })
 
     const invoiceId = String(invoice?.invoice_id || '')

@@ -1,10 +1,14 @@
+import { pickMapsLinkFromZohoAddressBlock, resolveMapsQuery, pickMapsLinkFromInvoiceNotes } from '../util/customerMapsLink.js'
+
 export function mapDeliveryStopFromSalesOrder(order, index) {
   const shipping = order.shipping_address || {}
   const billing = order.billing_address || {}
   const cityStateZip = [shipping.city, shipping.state, shipping.zip].filter(Boolean).join(', ')
   const addressLine1 = shipping.address || billing.address || 'Address unavailable'
   const addressLine2 = cityStateZip || shipping.country || billing.country || ''
-  const mapsQuery = [addressLine1, addressLine2].filter(Boolean).join(', ')
+  const mapsLink = pickMapsLinkFromZohoAddressBlock(shipping) || pickMapsLinkFromZohoAddressBlock(billing) || pickMapsLinkFromInvoiceNotes(order)
+  const addressText = [addressLine1, addressLine2].filter(Boolean).join(', ')
+  const mapsQuery = resolveMapsQuery({ mapsLink, addressText })
   const contactName = shipping.attention || order.customer_name || 'Customer'
   const amount = Number(order.total) || 0
   const lineItems = Array.isArray(order.line_items) ? order.line_items : []

@@ -75,7 +75,7 @@ import {
 } from '../services/notificationService.js'
 import { upsertInvoiceAssignmentNote } from '../services/zohoDeliveryAssignmentNotes.js'
 import { pricingTiersArraySchema } from '../services/customerPricingMath.js'
-import { paymentsByInvoiceIdMap } from '../services/paymentRecordStore.js'
+import { paymentsByInvoiceIdMap, listPaymentRecords } from '../services/paymentRecordStore.js'
 import {
   addPricingTier,
   deletePricingTier,
@@ -1003,15 +1003,28 @@ adminRoutes.get('/delivery-assignments', (_req, res) => {
   res.json({ assignments: listAssignments() })
 })
 
+adminRoutes.get('/payments', (_req, res) => {
+  const payments = listPaymentRecords().sort((a, b) =>
+    String(b.createdAt || b.paidAt || '').localeCompare(String(a.createdAt || a.paidAt || ''))
+  )
+  res.json({ payments })
+})
+
+async function loadAssignmentForProof(id) {
+  const { getAssignmentForProofDownload } = await import('../services/deliveryProofHttp.js')
+  const row = getAssignmentForProofDownload(id)
+  if (!row) {
+    const err = new Error('Assignment not found')
+    err.statusCode = 404
+    throw err
+  }
+  return row
+}
+
 adminRoutes.get('/delivery-assignments/:id/proof', async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
-    const row = getAssignmentById(id)
-    if (!row?.proof) {
-      const err = new Error('Proof not found for this assignment')
-      err.statusCode = 404
-      throw err
-    }
+    const row = await loadAssignmentForProof(id)
     const { resolveProofPhotoResponse } = await import('../services/deliveryProofHttp.js')
     const photo = await resolveProofPhotoResponse(row)
     if (!photo) {
@@ -1030,12 +1043,7 @@ adminRoutes.get('/delivery-assignments/:id/proof', async (req, res, next) => {
 adminRoutes.get('/delivery-assignments/:id/proof/photo', async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
-    const row = getAssignmentById(id)
-    if (!row?.proof) {
-      const err = new Error('Proof not found for this assignment')
-      err.statusCode = 404
-      throw err
-    }
+    const row = await loadAssignmentForProof(id)
     const { resolveProofPhotoResponse } = await import('../services/deliveryProofHttp.js')
     const photo = await resolveProofPhotoResponse(row)
     if (!photo) {
@@ -1054,7 +1062,7 @@ adminRoutes.get('/delivery-assignments/:id/proof/photo', async (req, res, next) 
 adminRoutes.get('/delivery-assignments/:id/proof/signature', async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
-    const row = getAssignmentById(id)
+    const row = await loadAssignmentForProof(id)
     if (!row?.proof) {
       const err = new Error('Proof not found for this assignment')
       err.statusCode = 404
@@ -1078,14 +1086,35 @@ adminRoutes.get('/delivery-assignments/:id/proof/signature', async (req, res, ne
 adminRoutes.get('/delivery-assignments/:id/proof/summary', async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
-    const row = getAssignmentById(id)
-    if (!row?.proof) {
-      const err = new Error('Proof not found for this assignment')
-      err.statusCode = 404
-      throw err
+    const row = await loadAssignmentForProof(id)
+    const { buildProofSummary, resolveProofPhotoResponse } = await import('../services/deliveryProofHttp.js')
+    const summary = buildProofSummary(row)
+    if (summary) {
+      res.json({ summary })
+      return
     }
-    const { buildProofSummary } = await import('../services/deliveryProofHttp.js')
-    res.json({ summary: buildProofSummary(row) })
+    const photo = await resolveProofPhotoResponse(row)
+    if (photo) {
+      res.json({
+        summary: {
+          assignmentId: row.id,
+          invoiceId: row.invoiceId,
+          invoiceNumber: row.invoiceNumber,
+          recipientName: row.proof?.recipientName || '',
+          uploadedAt: row.proof?.uploadedAt || row.deliveredAt || null,
+          deliveredAt: row.deliveredAt || null,
+          fileName: photo.fileName || row.proof?.fileName || 'proof.jpg',
+          hasPhoto: true,
+          hasSignature: Boolean(row.proof?.signatureDocumentId),
+          storedInZoho: true,
+          notes: row.proof?.notes || ''
+        }
+      })
+      return
+    }
+    const err = new Error('Proof not found for this assignment')
+    err.statusCode = 404
+    throw err
   } catch (error) {
     next(error)
   }

@@ -59,7 +59,10 @@ export function CartScreen({
               <button type="button" className="counter-btn" onClick={() => onDecrease(item.product.id)}>
                 <span className="material-symbols-outlined">remove</span>
               </button>
-              <strong>{item.quantity}</strong>
+              <strong>
+                {item.quantity}
+                {item.product.unit ? ` ${item.product.unit}` : ''}
+              </strong>
               <button type="button" className="counter-btn" onClick={() => onIncrease(item.product.id)}>
                 <span className="material-symbols-outlined">add</span>
               </button>

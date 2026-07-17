@@ -17,6 +17,7 @@ import {
   listContactsDetailBySearchText,
   updateModule
 } from './zohoBooksService.js'
+import { normalizeMapsLink, pickMapsLinkFromZohoAddressBlock, isGoogleMapsUrl } from '../util/customerMapsLink.js'
 
 const log = createLogger('auth')
 
@@ -41,7 +42,9 @@ function formatDeliveryAddressFromContact(contact) {
   const bill = contact?.billing_address && typeof contact.billing_address === 'object' ? contact.billing_address : {}
   const build = (a) => {
     const line1 = String(a.address || '').trim()
-    const rest = [a.street2, a.city, a.state, a.zip, a.country].map((x) => String(x || '').trim()).filter(Boolean)
+    const street2Raw = String(a.street2 || '').trim()
+    const street2 = street2Raw && !isGoogleMapsUrl(street2Raw) ? street2Raw : ''
+    const rest = [street2, a.city, a.state, a.zip, a.country].map((x) => String(x || '').trim()).filter(Boolean)
     return [line1, ...rest].filter(Boolean).join(', ')
   }
   const s = build(ship)
@@ -74,16 +77,24 @@ function contactPersonsWithPrimaryPhone(contact, mobileVal) {
   return persons.map((p, i) => (i === idx ? { ...p, phone: v, mobile: v } : { ...p }))
 }
 
+function pickMapsLinkFromContact(contact) {
+  const ship = contact?.shipping_address && typeof contact.shipping_address === 'object' ? contact.shipping_address : {}
+  const bill = contact?.billing_address && typeof contact.billing_address === 'object' ? contact.billing_address : {}
+  return pickMapsLinkFromZohoAddressBlock(ship) || pickMapsLinkFromZohoAddressBlock(bill)
+}
+
 function toPublicUserFromContact(contact) {
   const id = String(contact?.contact_id ?? '')
   const mobile = pickMobileFromContact(contact)
   const deliveryAddress = formatDeliveryAddressFromContact(contact)
+  const mapsLink = pickMapsLinkFromContact(contact)
   return {
     id,
     fullName: String(contact?.contact_name || contact?.email || 'Customer'),
     email: normalizeEmail(String(contact?.email || '')),
     ...(mobile ? { mobile } : {}),
-    ...(deliveryAddress ? { deliveryAddress } : {})
+    ...(deliveryAddress ? { deliveryAddress } : {}),
+    ...(mapsLink ? { mapsLink } : {})
   }
 }
 
@@ -150,7 +161,7 @@ export async function createCustomerUser({ email, password, contactId: explicitC
  * Self-service signup: ensures Zoho customer contact + app password in notes.
  * @returns {{ user: object, zohoContactCreated: boolean }}
  */
-export async function signupCustomerUser({ fullName, email, password, mobile, deliveryAddress }) {
+export async function signupCustomerUser({ fullName, email, password, mobile, deliveryAddress, mapsLink }) {
   const normalizedEmail = normalizeEmail(email)
   const prior = await findCustomerByEmail(normalizedEmail)
   const zohoContactCreated = !prior?.contact_id
@@ -194,24 +205,20 @@ export async function signupCustomerUser({ fullName, email, password, mobile, de
   }
 
   const addr = typeof deliveryAddress === 'string' ? deliveryAddress.trim() : ''
+  const profileSeed = { mobile: mob }
+  if (addr) profileSeed.deliveryAddress = addr
+  if (typeof mapsLink === 'string') profileSeed.mapsLink = mapsLink
 
   try {
     // Persist mobile (and optional address) on the Zoho Books contact before app-login hash.
-    await updateCustomerUserByEmail(normalizedEmail, {
-      mobile: mob,
-      ...(addr ? { deliveryAddress: addr } : {})
-    })
+    await updateCustomerUserByEmail(normalizedEmail, profileSeed)
 
     let user = await createCustomerUser({
       email: normalizedEmail,
       password,
       contactId: contact.contact_id
     })
-    user =
-      (await updateCustomerUserByEmail(normalizedEmail, {
-        mobile: mob,
-        ...(addr ? { deliveryAddress: addr } : {})
-      })) || user
+    user = (await updateCustomerUserByEmail(normalizedEmail, profileSeed)) || user
     return { user, zohoContactCreated }
   } catch (err) {
     if (zohoContactCreated) {
@@ -306,6 +313,31 @@ export async function updateCustomerUserByEmail(email, updates) {
   const current = detailBefore?.contact || detailBefore || contact
   const prevBill =
     current?.billing_address && typeof current.billing_address === 'object' ? { ...current.billing_address } : {}
+  const prevShip =
+    current?.shipping_address && typeof current.shipping_address === 'object' ? { ...current.shipping_address } : {}
+  const addressPatch =
+    typeof updates.deliveryAddress === 'string' || updates.mapsLink !== undefined
+      ? (() => {
+          const nextAddress =
+            typeof updates.deliveryAddress === 'string'
+              ? String(updates.deliveryAddress ?? '').trim()
+              : String(prevBill.address || prevShip.address || '').trim()
+          const nextMaps =
+            updates.mapsLink !== undefined ? normalizeMapsLink(updates.mapsLink) : pickMapsLinkFromContact(current)
+          return {
+            billing_address: {
+              ...prevBill,
+              address: nextAddress,
+              street2: nextMaps
+            },
+            shipping_address: {
+              ...prevShip,
+              address: nextAddress,
+              street2: nextMaps
+            }
+          }
+        })()
+      : null
 
   const zohoPayload = {
     contact_id: contact.contact_id,
@@ -324,14 +356,7 @@ export async function updateCustomerUserByEmail(email, updates) {
           }
         })()
       : {}),
-    ...(typeof updates.deliveryAddress === 'string'
-      ? {
-          billing_address: {
-            ...prevBill,
-            address: String(updates.deliveryAddress ?? '').trim()
-          }
-        }
-      : {})
+    ...(addressPatch || {})
   }
 
   if (Object.keys(zohoPayload).length > 1) {

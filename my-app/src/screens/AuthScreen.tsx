@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useToast } from '../contexts/ToastContext'
 import { loginCustomer, signupCustomer } from '../services/authApi'
 import type { AuthUser } from '../services/authApi'
+import { isGoogleMapsUrl } from '../utils/mapsLink'
 
 export type AuthSuccessPayload = {
   message: string
@@ -64,6 +65,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
   const [fullName, setFullName] = useState('')
   const [mobile, setMobile] = useState('')
   const [deliveryAddress, setDeliveryAddress] = useState('')
+  const [mapsLink, setMapsLink] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -109,6 +111,12 @@ export function AuthScreen({ onAuthenticated }: Props) {
     const em = email.trim()
     const mob = mobile.trim()
     const addr = deliveryAddress.trim()
+    const maps = mapsLink.trim()
+
+    if (maps && !isGoogleMapsUrl(maps)) {
+      showToast('Enter a valid Google Maps link or leave it blank', { variant: 'error' })
+      return
+    }
 
     if (!name || name.length < 2) {
       showToast('Enter your full name (at least 2 characters)', { variant: 'error' })
@@ -142,7 +150,8 @@ export function AuthScreen({ onAuthenticated }: Props) {
         email: em,
         password,
         mobile: mob,
-        ...(addr ? { deliveryAddress: addr } : {})
+        ...(addr ? { deliveryAddress: addr } : {}),
+        ...(maps ? { mapsLink: maps } : {})
       })
       if (!result.token) {
         showToast('Account created but no session token returned.', { variant: 'error' })
@@ -224,6 +233,15 @@ export function AuthScreen({ onAuthenticated }: Props) {
             rows={2}
             value={deliveryAddress}
             onChange={(e) => setDeliveryAddress(e.target.value)}
+          />
+          <input
+            className="auth-input"
+            type="url"
+            inputMode="url"
+            placeholder="Google Maps link (optional)"
+            value={mapsLink}
+            onChange={(e) => setMapsLink(e.target.value)}
+            autoComplete="off"
           />
           <PasswordField
             value={password}

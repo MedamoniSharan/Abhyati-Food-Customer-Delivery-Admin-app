@@ -69,11 +69,31 @@ function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase()
 }
 
+function invoiceContactEmails(invoice) {
+  const emails = new Set()
+  const primary = normalizeEmail(invoice?.customer_email)
+  if (primary) emails.add(primary)
+  const billing = invoice?.billing_address
+  if (billing && typeof billing === 'object') {
+    const be = normalizeEmail(billing.email)
+    if (be) emails.add(be)
+  }
+  const contacts = invoice?.contact_persons
+  if (Array.isArray(contacts)) {
+    for (const person of contacts) {
+      const pe = normalizeEmail(person?.email)
+      if (pe) emails.add(pe)
+    }
+  }
+  return emails
+}
+
 /** Zoho list payloads sometimes omit `customer_email`; `customer_id` is reliable after checkout. */
 function invoiceBelongsToAppCustomer(invoice, customerEmail, zohoCustomerId) {
   const email = normalizeEmail(customerEmail)
   const invEmail = normalizeEmail(invoice?.customer_email)
   if (invEmail && invEmail === email) return true
+  if (invoiceContactEmails(invoice).has(email)) return true
   const zid = String(zohoCustomerId || '').trim()
   if (zid && String(invoice?.customer_id || '').trim() === zid) return true
   return false
@@ -131,11 +151,19 @@ async function listCustomerItemsForApp(query, customerEmail) {
   )
   if (isProductCategoryConfigured()) out = enrichCustomerItemsResponse(out)
   if (getZohoItemMinPurchaseFieldId()) out = enrichMinPurchaseOnItemsListResponse(out)
+  if ((out.items || []).length === 0 && indexed.total_matched === 0) {
+    const { createLogger } = await import('../util/logger.js')
+    createLogger('customer-items').info('Category filter returned no items', {
+      categoryFilter,
+      page: pageNum
+    })
+  }
   return {
     code: 0,
     message: 'success',
     items: out.items || [],
-    page_context: indexed.page_context
+    page_context: indexed.page_context,
+    ...(indexed.total_matched != null ? { category_total_matched: indexed.total_matched } : {})
   }
 }
 
@@ -186,13 +214,14 @@ customerRoutes.post('/orders', async (req, res, next) => {
   try {
     const body = createOrderSchema.parse(req.body)
     const customer = req.customer
-    const { customerId } = await resolveCustomerContactForCheckout(customer)
+    const { customerId, deliveryAddressBlock } = await resolveCustomerContactForCheckout(customer)
     const resolvedLines = await resolveCheckoutLineItems(body.line_items, customer.email)
 
     const { salesOrderData, invoice, salesorder } = await createZohoOrderAndInvoice({
       customerId,
       resolvedLines,
-      referenceNumber: body.reference_number
+      referenceNumber: body.reference_number,
+      deliveryAddressBlock
     })
 
     const order = invoice ? mapInvoiceToOrder(invoice, null) : null

@@ -15,6 +15,10 @@ export type Product = {
   category: string
   /** Zoho available units; when set, cart / quantity must not exceed this. */
   availableStock?: number
+  /** Minimum order quantity (bulk MOQ from Zoho). */
+  minPurchaseCount?: number
+  /** Zoho unit label (e.g. pcs, carton). */
+  unit?: string
 }
 
 export type OrderStatus = 'Shipped' | 'Processing' | 'Delivered'

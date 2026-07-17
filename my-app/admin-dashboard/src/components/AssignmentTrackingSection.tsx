@@ -83,8 +83,12 @@ export function AssignmentTrackingSection({
 }: Props) {
   const [preview, setPreview] = useState<ProofPreviewState | null>(null)
 
+  function assignmentHasProof(row: DeliveryAssignmentRow): boolean {
+    return Boolean(row.proof) || String(row.status || '').toLowerCase() === 'delivered'
+  }
+
   useEffect(() => {
-    if (!preview?.row.proof) return
+    if (!preview?.row) return
     let cancelled = false
     let photoUrl: string | null = null
     let signatureUrl: string | null = null
@@ -124,7 +128,7 @@ export function AssignmentTrackingSection({
   }, [preview?.row.id, onToast])
 
   function openProofPreview(row: DeliveryAssignmentRow) {
-    if (!row.proof) return
+    if (!assignmentHasProof(row)) return
     setPreview({ row, photoUrl: null, signatureUrl: null, loading: true })
   }
 
@@ -218,6 +222,8 @@ export function AssignmentTrackingSection({
                         ) : null}
                         <span style={{ color: 'var(--admin-muted)', fontSize: '0.7rem' }}>Stored in Zoho Books</span>
                       </span>
+                    ) : String(row.status || '').toLowerCase() === 'delivered' ? (
+                      <span style={{ color: 'var(--admin-muted)' }}>In Zoho Books</span>
                     ) : (
                       <span style={{ color: 'var(--admin-muted)' }}>Pending</span>
                     )}
@@ -227,7 +233,7 @@ export function AssignmentTrackingSection({
                       <button
                         type="button"
                         className="admin-btn admin-btn--ghost admin-btn-inline"
-                        disabled={!row.proof}
+                        disabled={!assignmentHasProof(row)}
                         onClick={() => openProofPreview(row)}
                       >
                         View proof
@@ -235,7 +241,7 @@ export function AssignmentTrackingSection({
                       <button
                         type="button"
                         className="admin-btn admin-btn--ghost admin-btn-inline"
-                        disabled={!row.proof}
+                        disabled={!assignmentHasProof(row)}
                         onClick={async () => {
                           try {
                             const blob = await adminDownload(

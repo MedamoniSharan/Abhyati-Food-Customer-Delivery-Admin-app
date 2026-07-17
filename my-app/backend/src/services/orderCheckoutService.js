@@ -10,6 +10,7 @@ import {
   applyCustomerPrice,
   getActiveTierForCustomerEmail
 } from './customerPricingZohoService.js'
+import { buildZohoDeliveryAddressBlock, buildZohoInvoiceCheckoutAddress } from '../util/customerMapsLink.js'
 
 export async function resolveCustomerContactForCheckout(customer) {
   const contact = await ensureCustomerContact({
@@ -22,7 +23,15 @@ export async function resolveCustomerContactForCheckout(customer) {
     err.statusCode = 502
     throw err
   }
-  return { contact, customerId }
+  let fullContact = contact
+  try {
+    const data = await getModuleById('/contacts', customerId)
+    fullContact = data?.contact || data || contact
+  } catch {
+    /* use list contact if detail fetch fails */
+  }
+  const deliveryAddressBlock = buildZohoDeliveryAddressBlock(fullContact)
+  return { contact: fullContact, customerId, deliveryAddressBlock }
 }
 
 export async function resolveCheckoutLineItems(lineItems, customerEmail) {
@@ -61,7 +70,8 @@ export function computeLineItemsTotalInr(resolvedLines) {
 export async function createZohoOrderAndInvoice({
   customerId,
   resolvedLines,
-  referenceNumber
+  referenceNumber,
+  deliveryAddressBlock = null
 }) {
   const salesOrderPayload = {
     customer_id: customerId,
@@ -72,6 +82,19 @@ export async function createZohoOrderAndInvoice({
     customer_id: customerId,
     reference_number: referenceNumber,
     line_items: resolvedLines
+  }
+  if (deliveryAddressBlock && typeof deliveryAddressBlock === 'object') {
+    const { billing_address, mapsNote } = buildZohoInvoiceCheckoutAddress(deliveryAddressBlock)
+    if (billing_address) {
+      salesOrderPayload.billing_address = billing_address
+      salesOrderPayload.shipping_address = billing_address
+      invoicePayload.billing_address = billing_address
+      invoicePayload.shipping_address = billing_address
+    }
+    if (mapsNote) {
+      salesOrderPayload.notes = mapsNote
+      invoicePayload.notes = mapsNote
+    }
   }
   const spFields = await resolveDefaultSalespersonFieldsForTransactions()
   if (spFields) {
