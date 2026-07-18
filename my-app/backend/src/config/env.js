@@ -77,7 +77,12 @@ const envSchema = z.object({
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
 
   /** Zoho Books bank account for recording Razorpay customer payments */
-  ZOHO_PAYMENT_ACCOUNT_ID: z.string().optional()
+  ZOHO_PAYMENT_ACCOUNT_ID: z.string().optional(),
+
+  /** MSG91 phone OTP for customer signup (optional — required to send/verify OTP) */
+  MSG91_AUTH_KEY: z.string().optional(),
+  MSG91_TEMPLATE_ID: z.string().optional(),
+  MSG91_OTP_LENGTH: z.coerce.number().int().min(4).max(9).default(6)
 })
 
 const parsed = envSchema.safeParse(process.env)

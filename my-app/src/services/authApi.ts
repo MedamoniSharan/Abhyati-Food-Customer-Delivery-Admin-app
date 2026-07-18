@@ -43,6 +43,7 @@ type ParsedBody = {
   message?: string
   user?: AuthUser
   token?: string
+  mobile?: string
   zoho?: { message?: string }
   zoho_auth_hint?: string
 }
@@ -68,7 +69,12 @@ function formatAuthErrorMessage(data: ParsedBody, status: number): string {
   return msg
 }
 
-async function authRequest(path: string, payload: Record<string, string | undefined>): Promise<LoginResponse> {
+async function authRequest(
+  path: string,
+  payload: Record<string, string | undefined>,
+  options?: { expectUser?: boolean }
+): Promise<LoginResponse & { mobile?: string }> {
+  const expectUser = options?.expectUser !== false
   logApiCandidatesOnce(API_BASE_URL_CANDIDATES)
   let lastError: unknown = null
 
@@ -91,14 +97,15 @@ async function authRequest(path: string, payload: Record<string, string | undefi
         throw new Error(msg)
       }
 
-      if (!data.user) {
+      if (expectUser && !data.user) {
         throw new Error('Invalid response from server')
       }
 
       return {
         message: data.message || 'OK',
-        user: data.user,
-        token: data.token
+        user: data.user as AuthUser,
+        token: data.token,
+        mobile: typeof data.mobile === 'string' ? data.mobile : undefined
       }
     } catch (error) {
       if (error instanceof AuthClientError) {
@@ -135,8 +142,19 @@ export type SignupPayload = {
   email: string
   password: string
   mobile: string
+  otp: string
   deliveryAddress?: string
   mapsLink?: string
+}
+
+export async function sendSignupOtp(mobile: string): Promise<{ message: string }> {
+  const result = await authRequest('/api/auth/otp/send', { mobile: mobile.trim() }, { expectUser: false })
+  return { message: result.message }
+}
+
+export async function resendSignupOtp(mobile: string): Promise<{ message: string }> {
+  const result = await authRequest('/api/auth/otp/resend', { mobile: mobile.trim() }, { expectUser: false })
+  return { message: result.message }
 }
 
 export async function signupCustomer(payload: SignupPayload): Promise<LoginResponse> {
@@ -144,7 +162,8 @@ export async function signupCustomer(payload: SignupPayload): Promise<LoginRespo
     fullName: payload.fullName.trim(),
     email: payload.email.trim(),
     password: payload.password,
-    mobile: payload.mobile.trim()
+    mobile: payload.mobile.trim(),
+    otp: payload.otp.trim()
   }
   const deliveryAddress = payload.deliveryAddress?.trim()
   if (deliveryAddress) body.deliveryAddress = deliveryAddress

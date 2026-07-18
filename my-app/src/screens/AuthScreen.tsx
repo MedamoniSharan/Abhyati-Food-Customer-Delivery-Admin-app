@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useToast } from '../contexts/ToastContext'
-import { loginCustomer, signupCustomer } from '../services/authApi'
+import { loginCustomer, resendSignupOtp, sendSignupOtp, signupCustomer } from '../services/authApi'
 import type { AuthUser } from '../services/authApi'
 import { isGoogleMapsUrl } from '../utils/mapsLink'
 
@@ -15,6 +15,16 @@ type Props = {
 }
 
 type AuthView = 'welcome' | 'login' | 'signup'
+
+const OTP_RESEND_SECONDS = 30
+
+function looksLikeIndiaMobile(value: string): boolean {
+  const digits = value.replace(/\D/g, '')
+  if (digits.length === 10 && /^[6-9]/.test(digits)) return true
+  if (digits.length === 12 && /^91[6-9]\d{9}$/.test(digits)) return true
+  if (digits.length === 11 && /^0[6-9]\d{9}$/.test(digits)) return true
+  return false
+}
 
 function PasswordField({
   value,
@@ -64,20 +74,70 @@ export function AuthScreen({ onAuthenticated }: Props) {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [fullName, setFullName] = useState('')
   const [mobile, setMobile] = useState('')
+  const [otp, setOtp] = useState('')
+  const [otpSent, setOtpSent] = useState(false)
+  const [resendIn, setResendIn] = useState(0)
   const [deliveryAddress, setDeliveryAddress] = useState('')
   const [mapsLink, setMapsLink] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [otpLoading, setOtpLoading] = useState(false)
+
+  useEffect(() => {
+    if (resendIn <= 0) return
+    const t = window.setTimeout(() => setResendIn((s) => s - 1), 1000)
+    return () => window.clearTimeout(t)
+  }, [resendIn])
 
   function goToLogin() {
     setView('login')
     setConfirmPassword('')
+    setOtp('')
+    setOtpSent(false)
+    setResendIn(0)
   }
 
   function goToSignup() {
     setView('signup')
     setConfirmPassword('')
+    setOtp('')
+    setOtpSent(false)
+    setResendIn(0)
+  }
+
+  function validateSignupFields(): boolean {
+    const name = fullName.trim()
+    const em = email.trim()
+    const mob = mobile.trim()
+    const maps = mapsLink.trim()
+
+    if (maps && !isGoogleMapsUrl(maps)) {
+      showToast('Enter a valid Google Maps link or leave it blank', { variant: 'error' })
+      return false
+    }
+
+    if (!name || name.length < 2) {
+      showToast('Enter your full name (at least 2 characters)', { variant: 'error' })
+      return false
+    }
+    if (!em) {
+      showToast('Enter your email address', { variant: 'error' })
+      return false
+    }
+    if (!looksLikeIndiaMobile(mob)) {
+      showToast('Enter a valid 10-digit Indian mobile number', { variant: 'error' })
+      return false
+    }
+    if (password.length < 6) {
+      showToast('Password must be at least 6 characters', { variant: 'error' })
+      return false
+    }
+    if (password !== confirmPassword) {
+      showToast('Passwords do not match', { variant: 'error' })
+      return false
+    }
+    return true
   }
 
   async function submitLogin() {
@@ -106,42 +166,58 @@ export function AuthScreen({ onAuthenticated }: Props) {
     }
   }
 
+  async function handleSendOtp() {
+    if (!validateSignupFields()) return
+    setOtpLoading(true)
+    try {
+      await sendSignupOtp(mobile.trim())
+      setOtpSent(true)
+      setResendIn(OTP_RESEND_SECONDS)
+      showToast('OTP sent to your mobile', { variant: 'success' })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to send OTP'
+      showToast(message, { variant: 'error' })
+    } finally {
+      setOtpLoading(false)
+    }
+  }
+
+  async function handleResendOtp() {
+    if (resendIn > 0) return
+    if (!looksLikeIndiaMobile(mobile.trim())) {
+      showToast('Enter a valid 10-digit Indian mobile number', { variant: 'error' })
+      return
+    }
+    setOtpLoading(true)
+    try {
+      await resendSignupOtp(mobile.trim())
+      setResendIn(OTP_RESEND_SECONDS)
+      showToast('OTP resent', { variant: 'success' })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to resend OTP'
+      showToast(message, { variant: 'error' })
+    } finally {
+      setOtpLoading(false)
+    }
+  }
+
   async function submitSignup() {
+    if (!validateSignupFields()) return
+    if (!otpSent) {
+      showToast('Send OTP to your mobile first', { variant: 'error' })
+      return
+    }
+    const code = otp.trim()
+    if (!/^\d{4,9}$/.test(code)) {
+      showToast('Enter the OTP sent to your mobile', { variant: 'error' })
+      return
+    }
+
     const name = fullName.trim()
     const em = email.trim()
     const mob = mobile.trim()
     const addr = deliveryAddress.trim()
     const maps = mapsLink.trim()
-
-    if (maps && !isGoogleMapsUrl(maps)) {
-      showToast('Enter a valid Google Maps link or leave it blank', { variant: 'error' })
-      return
-    }
-
-    if (!name || name.length < 2) {
-      showToast('Enter your full name (at least 2 characters)', { variant: 'error' })
-      return
-    }
-    if (!em) {
-      showToast('Enter your email address', { variant: 'error' })
-      return
-    }
-    if (!mob || mob.length < 8) {
-      showToast('Enter your mobile number (at least 8 digits)', { variant: 'error' })
-      return
-    }
-    if (!/\d/.test(mob)) {
-      showToast('Enter a valid mobile number', { variant: 'error' })
-      return
-    }
-    if (password.length < 6) {
-      showToast('Password must be at least 6 characters', { variant: 'error' })
-      return
-    }
-    if (password !== confirmPassword) {
-      showToast('Passwords do not match', { variant: 'error' })
-      return
-    }
 
     setLoading(true)
     try {
@@ -150,6 +226,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
         email: em,
         password,
         mobile: mob,
+        otp: code,
         ...(addr ? { deliveryAddress: addr } : {}),
         ...(maps ? { mapsLink: maps } : {})
       })
@@ -198,7 +275,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
         <div className="auth-form-card auth-form-card--scroll">
           <img src="/app-logo.png" alt="Abhyati food logo" className="auth-logo auth-logo-top" />
           <h2>Create account</h2>
-          <p>Sign up to browse products and place orders.</p>
+          <p>Sign up to browse products and place orders. We verify your mobile with OTP.</p>
 
           <input
             className="auth-input"
@@ -225,7 +302,12 @@ export function AuthScreen({ onAuthenticated }: Props) {
             inputMode="tel"
             required
             value={mobile}
-            onChange={(e) => setMobile(e.target.value)}
+            onChange={(e) => {
+              setMobile(e.target.value)
+              setOtpSent(false)
+              setOtp('')
+              setResendIn(0)
+            }}
           />
           <textarea
             className="auth-input auth-textarea"
@@ -260,19 +342,54 @@ export function AuthScreen({ onAuthenticated }: Props) {
             onToggleShow={() => setShowConfirmPassword((v) => !v)}
           />
 
+          <div className="auth-otp-row">
+            <input
+              className="auth-input auth-otp-input"
+              placeholder="OTP"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={9}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 9))}
+              disabled={!otpSent}
+            />
+            <button
+              type="button"
+              className="auth-otp-send-btn"
+              onClick={() => void (otpSent ? handleResendOtp() : handleSendOtp())}
+              disabled={loading || otpLoading || (otpSent && resendIn > 0)}
+            >
+              {otpSent
+                ? resendIn > 0
+                  ? `Resend (${resendIn}s)`
+                  : otpLoading
+                    ? 'Please wait...'
+                    : 'Resend OTP'
+                : otpLoading
+                  ? 'Sending...'
+                  : 'Send OTP'}
+            </button>
+          </div>
+
           <button
             type="button"
             className="auth-primary-btn"
             onClick={() => void submitSignup()}
-            disabled={loading}
+            disabled={loading || otpLoading || !otpSent || otp.trim().length < 4}
           >
             {loading ? 'Creating account...' : 'Sign up'}
           </button>
 
-          <button type="button" className="auth-link-btn" onClick={goToLogin} disabled={loading}>
+          <button type="button" className="auth-link-btn" onClick={goToLogin} disabled={loading || otpLoading}>
             Already have an account? Log in
           </button>
-          <button type="button" className="auth-link-btn" onClick={() => setView('welcome')} disabled={loading}>
+          <button
+            type="button"
+            className="auth-link-btn"
+            onClick={() => setView('welcome')}
+            disabled={loading || otpLoading}
+          >
             Back
           </button>
         </div>

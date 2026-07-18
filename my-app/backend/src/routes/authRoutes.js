@@ -11,6 +11,13 @@ import {
 import { signCustomerToken, verifyCustomerToken } from '../services/jwtService.js'
 import { getActiveTierForContact, isCustomerPricingConfigured } from '../services/customerPricingZohoService.js'
 import { isGoogleMapsUrl } from '../util/customerMapsLink.js'
+import {
+  isMsg91Configured,
+  normalizeIndiaMobile,
+  resendOtp,
+  sendOtp,
+  verifyOtp
+} from '../services/msg91OtpService.js'
 
 const mapsLinkField = z
   .string()
@@ -25,16 +32,28 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Password is required')
 })
 
+const mobileSchema = z
+  .string()
+  .trim()
+  .min(8, 'Mobile number is required')
+  .max(50, 'Mobile number is too long')
+  .refine((v) => Boolean(normalizeIndiaMobile(v)), {
+    message: 'Enter a valid 10-digit Indian mobile number'
+  })
+
+const otpSendSchema = z.object({
+  mobile: mobileSchema
+})
+
 const signupSchema = z.object({
   fullName: z.string().trim().min(2, 'Full name is required'),
   email: z.string().email('Valid email is required'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
-  mobile: z
+  mobile: mobileSchema,
+  otp: z
     .string()
     .trim()
-    .min(8, 'Mobile number is required')
-    .max(50, 'Mobile number is too long')
-    .refine((v) => /\d/.test(v), { message: 'Enter a valid mobile number' }),
+    .regex(/^\d{4,9}$/, 'Enter the OTP sent to your mobile'),
   deliveryAddress: z.string().max(2000).optional(),
   mapsLink: mapsLinkField
 })
@@ -57,10 +76,51 @@ function normEmail(e) {
 
 export const authRoutes = Router()
 
+authRoutes.post('/otp/send', async (req, res, next) => {
+  try {
+    if (!isMsg91Configured()) {
+      const err = new Error('Phone verification is not configured. Contact support.')
+      err.statusCode = 503
+      throw err
+    }
+    const { mobile } = otpSendSchema.parse(req.body)
+    await sendOtp(mobile)
+    res.json({ message: 'OTP sent successfully', mobile: normalizeIndiaMobile(mobile) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+authRoutes.post('/otp/resend', async (req, res, next) => {
+  try {
+    if (!isMsg91Configured()) {
+      const err = new Error('Phone verification is not configured. Contact support.')
+      err.statusCode = 503
+      throw err
+    }
+    const { mobile } = otpSendSchema.parse(req.body)
+    await resendOtp(mobile)
+    res.json({ message: 'OTP resent successfully', mobile: normalizeIndiaMobile(mobile) })
+  } catch (error) {
+    next(error)
+  }
+})
+
 authRoutes.post('/signup', async (req, res, next) => {
   try {
+    if (!isMsg91Configured()) {
+      const err = new Error('Phone verification is not configured. Contact support.')
+      err.statusCode = 503
+      throw err
+    }
     const input = signupSchema.parse(req.body)
-    const { user } = await signupCustomerUser(input)
+    await verifyOtp(input.mobile, input.otp)
+    const { otp: _otp, ...rest } = input
+    const signupInput = {
+      ...rest,
+      mobile: normalizeIndiaMobile(input.mobile) || rest.mobile
+    }
+    const { user } = await signupCustomerUser(signupInput)
     const token = signCustomerToken(user.email)
     res.status(201).json({
       message: 'Account created successfully',

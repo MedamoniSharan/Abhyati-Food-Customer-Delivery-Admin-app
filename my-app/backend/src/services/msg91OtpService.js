@@ -1,0 +1,176 @@
+import { env } from '../config/env.js'
+import { createLogger } from '../util/logger.js'
+
+const log = createLogger('msg91-otp')
+
+const MSG91_BASE = 'https://control.msg91.com/api/v5'
+
+/**
+ * Normalize to India E.164 without plus: 91 + 10 digits.
+ * Accepts 10-digit local, 91XXXXXXXXXX, or +91...
+ */
+export function normalizeIndiaMobile(input) {
+  const digits = String(input || '').replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.length === 10 && /^[6-9]/.test(digits)) return `91${digits}`
+  if (digits.length === 12 && digits.startsWith('91') && /^91[6-9]/.test(digits)) return digits
+  if (digits.length === 11 && digits.startsWith('0') && /^0[6-9]\d{9}$/.test(digits)) {
+    return `91${digits.slice(1)}`
+  }
+  return ''
+}
+
+export function isMsg91Configured() {
+  return Boolean(env.MSG91_AUTH_KEY?.trim() && env.MSG91_TEMPLATE_ID?.trim())
+}
+
+function requireConfigured() {
+  if (!isMsg91Configured()) {
+    const err = new Error('Phone verification is not configured. Contact support.')
+    err.statusCode = 503
+    throw err
+  }
+}
+
+function msg91Error(message, statusCode = 400) {
+  const err = new Error(message)
+  err.statusCode = statusCode
+  return err
+}
+
+function mapMsg91Failure(data, fallback) {
+  const raw = data?.message
+  const text = typeof raw === 'string' ? raw.trim() : ''
+  if (!text) return msg91Error(fallback)
+  const lower = text.toLowerCase()
+  if (lower.includes('invalid mobile') || lower.includes('mobile number')) {
+    return msg91Error('Enter a valid Indian mobile number')
+  }
+  if (lower.includes('otp') && (lower.includes('expire') || lower.includes('invalid') || lower.includes('mismatch'))) {
+    return msg91Error('Invalid or expired OTP. Request a new one.')
+  }
+  if (lower.includes('auth') || lower.includes('template')) {
+    return msg91Error('Phone verification service error. Try again later.', 502)
+  }
+  return msg91Error(text.length < 120 ? text : fallback)
+}
+
+async function msg91Request(path, { method = 'GET', query = {} } = {}) {
+  requireConfigured()
+  const url = new URL(`${MSG91_BASE}${path}`)
+  for (const [key, value] of Object.entries(query)) {
+    if (value != null && value !== '') url.searchParams.set(key, String(value))
+  }
+
+  let response
+  try {
+    response = await fetch(url.toString(), {
+      method,
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authkey: env.MSG91_AUTH_KEY.trim()
+      }
+    })
+  } catch (err) {
+    log.error('MSG91 request failed', { path, message: err?.message })
+    throw msg91Error('Could not reach phone verification service. Try again.', 502)
+  }
+
+  let data = {}
+  const text = await response.text()
+  try {
+    data = text.trim() ? JSON.parse(text) : {}
+  } catch {
+    data = { message: text }
+  }
+
+  const type = String(data.type || '').toLowerCase()
+  const okHttp = response.ok
+  const okType = type === 'success' || type === ''
+  const messageOk =
+    typeof data.message === 'string' &&
+    /otp verified|success/i.test(data.message) &&
+    !/fail|invalid|error/i.test(data.message)
+
+  if (!okHttp || (!okType && !messageOk && type === 'error')) {
+    log.warn('MSG91 error response', { path, status: response.status, data })
+    throw mapMsg91Failure(data, 'Phone verification failed')
+  }
+
+  if (type === 'error') {
+    log.warn('MSG91 type=error', { path, data })
+    throw mapMsg91Failure(data, 'Phone verification failed')
+  }
+
+  return data
+}
+
+/**
+ * @param {string} mobile - raw or normalized
+ */
+export async function sendOtp(mobile) {
+  const normalized = normalizeIndiaMobile(mobile)
+  if (!normalized) {
+    throw msg91Error('Enter a valid 10-digit Indian mobile number')
+  }
+
+  await msg91Request('/otp', {
+    method: 'POST',
+    query: {
+      template_id: env.MSG91_TEMPLATE_ID.trim(),
+      mobile: normalized,
+      otp_length: env.MSG91_OTP_LENGTH || 6
+    }
+  })
+
+  return { mobile: normalized }
+}
+
+/**
+ * @param {string} mobile
+ * @param {string} otp
+ */
+export async function verifyOtp(mobile, otp) {
+  const normalized = normalizeIndiaMobile(mobile)
+  const code = String(otp || '').trim()
+  if (!normalized) {
+    throw msg91Error('Enter a valid 10-digit Indian mobile number')
+  }
+  if (!/^\d{4,9}$/.test(code)) {
+    throw msg91Error('Enter the OTP sent to your mobile')
+  }
+
+  const data = await msg91Request('/otp/verify', {
+    method: 'GET',
+    query: { mobile: normalized, otp: code }
+  })
+
+  const msg = String(data.message || '').toLowerCase()
+  if (msg.includes('otp verified') || data.type === 'success' || msg.includes('success')) {
+    return { mobile: normalized }
+  }
+
+  throw mapMsg91Failure(data, 'Invalid or expired OTP. Request a new one.')
+}
+
+/**
+ * Resend the same OTP (SMS retry).
+ * @param {string} mobile
+ */
+export async function resendOtp(mobile) {
+  const normalized = normalizeIndiaMobile(mobile)
+  if (!normalized) {
+    throw msg91Error('Enter a valid 10-digit Indian mobile number')
+  }
+
+  await msg91Request('/otp/retry', {
+    method: 'GET',
+    query: {
+      retrytype: 'text',
+      mobile: normalized
+    }
+  })
+
+  return { mobile: normalized }
+}
