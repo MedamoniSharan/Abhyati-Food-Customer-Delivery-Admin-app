@@ -82,7 +82,32 @@ const envSchema = z.object({
   /** MSG91 phone OTP for customer signup (optional — required to send/verify OTP) */
   MSG91_AUTH_KEY: z.string().optional(),
   MSG91_TEMPLATE_ID: z.string().optional(),
-  MSG91_OTP_LENGTH: z.coerce.number().int().min(4).max(9).default(6)
+  MSG91_OTP_LENGTH: z.coerce.number().int().min(4).max(9).default(6),
+
+  /** AWS DynamoDB (optional until configured — without table name, Zoho-only behavior remains) */
+  AWS_REGION: z.string().default('ap-south-1'),
+  AWS_ACCESS_KEY_ID: z.string().optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().optional(),
+  AWS_SESSION_TOKEN: z.string().optional(),
+  /** Multi-table prefix, e.g. Abhyati → Abhyati_contacts, Abhyati_items, ... */
+  DYNAMODB_TABLE_PREFIX: z.string().optional(),
+  /** Legacy single-table name; treated as prefix (AbhyatiApp → Abhyati) if PREFIX unset */
+  DYNAMODB_TABLE_NAME: z.string().optional(),
+  /** When false, skip dual-write even if table is set */
+  DYNAMODB_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => (v == null || v === '' ? true : v === 'true' || v === '1')),
+  /** When false, GETs still hit Zoho (writes may still dual-write). Defaults to true when configured. */
+  DYNAMODB_READS: z
+    .string()
+    .optional()
+    .transform((v) => (v == null || v === '' ? true : v === 'true' || v === '1')),
+  /** Daily Zoho → DynamoDB sync at 18:00 Asia/Kolkata (default on when Dynamo configured) */
+  DYNAMODB_SYNC_CRON_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => (v == null || v === '' ? true : v === 'true' || v === '1'))
 })
 
 const parsed = envSchema.safeParse(process.env)

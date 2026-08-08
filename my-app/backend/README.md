@@ -2,6 +2,8 @@
 
 Node/Express backend to integrate customer orders with Zoho Books.
 
+For AWS DynamoDB dual-write / read path / daily sync, see [docs/DYNAMODB.md](docs/DYNAMODB.md).
+
 ## Setup
 
 1. Install dependencies:

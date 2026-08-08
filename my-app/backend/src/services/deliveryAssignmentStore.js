@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createLogger, serializeError } from '../util/logger.js'
+import { putAssignment } from './dynamo/appDataDynamo.js'
 
 const log = createLogger('delivery')
 
@@ -10,13 +11,18 @@ const FILE = join(__dirname, '..', '..', 'data', 'delivery-assignments.json')
 
 const assignments = new Map()
 
+function mirrorAssignment(row) {
+  if (!row?.id) return
+  void putAssignment(row).catch((err) => log.error('Dynamo assignment mirror failed', serializeError(err)))
+}
+
 /** Re-read persisted rows so other API processes (or restarts) see assignments created elsewhere. */
 function reloadAssignmentsFromDisk() {
   assignments.clear()
   load()
 }
 
-function persist() {
+function persist(changedRow) {
   try {
     const dir = dirname(FILE)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
@@ -24,6 +30,7 @@ function persist() {
   } catch (err) {
     log.error('Assignment persist failed', serializeError(err))
   }
+  if (changedRow) mirrorAssignment(changedRow)
 }
 
 function load() {
@@ -82,7 +89,7 @@ export function upsertAssignmentRow(row) {
     updatedAt: String(row.updatedAt || row.createdAt || new Date().toISOString())
   }
   assignments.set(id, next)
-  persist()
+  persist(next)
   return next
 }
 
@@ -116,7 +123,7 @@ export function createAssignment({
     updatedAt: new Date().toISOString()
   }
   assignments.set(id, row)
-  persist()
+  persist(row)
   return row
 }
 
@@ -131,6 +138,6 @@ export function updateAssignment(id, patch) {
   if (!row) return null
   const next = { ...row, ...patch, updatedAt: new Date().toISOString() }
   assignments.set(String(id), next)
-  persist()
+  persist(next)
   return next
 }

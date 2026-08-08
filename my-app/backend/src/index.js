@@ -16,6 +16,8 @@ import { zohoRoutes } from './routes/zohoRoutes.js'
 import { seedDefaultUser } from './services/authStore.js'
 import { migrateLegacyJsonCredentialsOnce } from './services/migrateLegacyJsonCredentials.js'
 import { warmItemCategoryIndex } from './services/itemCategoryIndexCache.js'
+import { startZohoDynamoSyncCron } from './services/dynamoSyncScheduler.js'
+import { isDynamoConfigured } from './services/dynamo/dynamoClient.js'
 
 const log = createLogger('bootstrap')
 
@@ -59,11 +61,15 @@ async function start() {
       port: env.PORT,
       url: `http://localhost:${env.PORT}`,
       nodeEnv: process.env.NODE_ENV || 'development',
-      zohoRegion: env.ZOHO_REGION
+      zohoRegion: env.ZOHO_REGION,
+      dynamodbConfigured: isDynamoConfigured(),
+      dynamodbReads: env.DYNAMODB_READS,
+      dynamodbWrites: env.DYNAMODB_ENABLED
     })
     log.info('Default customer login email (dev reference)', { email: env.AUTH_DEFAULT_CUSTOMER_EMAIL })
     // Pre-build category index so chip filters are fast after startup.
     warmItemCategoryIndex()
+    startZohoDynamoSyncCron()
   })
 }
 

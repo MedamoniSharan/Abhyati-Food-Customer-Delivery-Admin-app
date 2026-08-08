@@ -22,20 +22,27 @@
     "zoho:test-token": "node scripts/zoho-oauth-helper.mjs test",
     "zoho:oauth-url": "node scripts/zoho-oauth-helper.mjs auth-url",
     "zoho:exchange-code": "node scripts/zoho-oauth-helper.mjs exchange",
+    "dynamo:create-table": "node scripts/create-dynamodb-table.mjs",
+    "dynamo:sync": "node scripts/sync-zoho-to-dynamo.mjs",
+    "dynamo:migrate-json": "node scripts/migrate-json-to-dynamo.mjs",
     "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1106.0",
+    "@aws-sdk/lib-dynamodb": "^3.1106.0",
     "axios": "^1.9.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
+    "node-cron": "^4.6.0",
     "proper-lockfile": "^4.1.2",
     "razorpay": "^2.9.6",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/jsonwebtoken": "^9.0.10"
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node-cron": "^3.0.11"
   }
 }

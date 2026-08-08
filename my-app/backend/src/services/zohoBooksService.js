@@ -1,7 +1,18 @@
 import axios from 'axios'
 import { env } from '../config/env.js'
+import { createLogger, serializeError } from '../util/logger.js'
 import { getZohoAccessToken } from './zohoAuthService.js'
 import { withZohoRetry, zohoAxios } from './zohoRateLimit.js'
+import { isDynamoReadsEnabled } from './dynamo/dynamoClient.js'
+import {
+  deleteMirroredEntity,
+  findContactPayloadByEmail,
+  listEntitiesFromDynamo,
+  mirrorZohoModuleResponse,
+  readEntityFromDynamo
+} from './dynamo/zohoDynamoMirror.js'
+
+const log = createLogger('zoho-books')
 
 async function request(method, path, { params, data } = {}) {
   const accessToken = await getZohoAccessToken()
@@ -67,6 +78,16 @@ function contactMatchesPrimaryEmail(contact, normalized) {
 export async function findContactByEmail(email, contactType) {
   const normalized = String(email || '').trim().toLowerCase()
   if (!normalized) return null
+
+  if (isDynamoReadsEnabled()) {
+    try {
+      const fromDdb = await findContactPayloadByEmail(normalized, contactType)
+      if (fromDdb) return fromDdb
+    } catch (err) {
+      log.warn('Dynamo contact email lookup failed; falling back to Zoho', serializeError(err))
+    }
+  }
+
   const organizationId = await getOrganizationId()
   const baseParams = { organization_id: organizationId, contact_type: contactType, per_page: 50 }
 
@@ -155,7 +176,7 @@ export async function createCustomer({ contact_name, email, mobile }) {
   const emailNorm = String(email || '').trim().toLowerCase()
   const name = String(contact_name || '').trim() || emailNorm
   const firstName = name.split(/\s+/).filter(Boolean)[0] || 'Customer'
-  return request('post', '/contacts', {
+  const body = await request('post', '/contacts', {
     params: { organization_id: organizationId },
     data: {
       contact_name: name.slice(0, 200),
@@ -175,36 +196,70 @@ export async function createCustomer({ contact_name, email, mobile }) {
       ]
     }
   })
+  await mirrorZohoModuleResponse('/contacts', body)
+  return body
 }
 
 export async function createInvoice(payload) {
   const organizationId = await getOrganizationId()
-  return request('post', '/invoices', {
+  const body = await request('post', '/invoices', {
     params: { organization_id: organizationId },
     data: payload
   })
+  await mirrorZohoModuleResponse('/invoices', body)
+  return body
 }
 
 export async function createSalesOrder(payload) {
   const organizationId = await getOrganizationId()
-  return request('post', '/salesorders', {
+  const body = await request('post', '/salesorders', {
     params: { organization_id: organizationId },
     data: payload
   })
+  await mirrorZohoModuleResponse('/salesorders', body)
+  return body
 }
 
-export async function listModule(modulePath, query = {}) {
+/** Always hits Zoho Books (used by daily sync — must not read Dynamo). */
+export async function listModuleFromZoho(modulePath, query = {}) {
   const organizationId = await getOrganizationId()
   return request('get', modulePath, {
     params: { organization_id: organizationId, ...query }
   })
 }
 
-export async function getModuleById(modulePath, id, query = {}) {
+/** Always hits Zoho Books (used by daily sync / write refresh). */
+export async function getModuleByIdFromZoho(modulePath, id, query = {}) {
   const organizationId = await getOrganizationId()
   return request('get', `${modulePath}/${id}`, {
     params: { organization_id: organizationId, ...query }
   })
+}
+
+export async function listModule(modulePath, query = {}) {
+  if (isDynamoReadsEnabled()) {
+    try {
+      const fromDdb = await listEntitiesFromDynamo(modulePath, query)
+      if (fromDdb) return fromDdb
+    } catch (err) {
+      log.warn('Dynamo list failed; falling back to Zoho', { modulePath, ...serializeError(err) })
+    }
+  }
+  return listModuleFromZoho(modulePath, query)
+}
+
+export async function getModuleById(modulePath, id, query = {}) {
+  if (isDynamoReadsEnabled()) {
+    try {
+      const fromDdb = await readEntityFromDynamo(modulePath, id)
+      if (fromDdb) return fromDdb
+    } catch (err) {
+      log.warn('Dynamo get failed; falling back to Zoho', { modulePath, id, ...serializeError(err) })
+    }
+  }
+  const body = await getModuleByIdFromZoho(modulePath, id, query)
+  await mirrorZohoModuleResponse(modulePath, body)
+  return body
 }
 
 /**
@@ -241,33 +296,53 @@ export async function listContactsDetailBySearchText({ searchText, contactType =
 
 export async function createModule(modulePath, payload, query = {}) {
   const organizationId = await getOrganizationId()
-  return request('post', modulePath, {
+  const body = await request('post', modulePath, {
     params: { organization_id: organizationId, ...query },
     data: payload
   })
+  await mirrorZohoModuleResponse(modulePath, body)
+  return body
 }
 
 export async function updateModule(modulePath, id, payload, query = {}) {
   const organizationId = await getOrganizationId()
-  return request('put', `${modulePath}/${encodeURIComponent(id)}`, {
+  const body = await request('put', `${modulePath}/${encodeURIComponent(id)}`, {
     params: { organization_id: organizationId, ...query },
     data: payload
   })
+  // List/update responses sometimes omit full entity — refresh from Zoho then mirror
+  try {
+    const fresh = await getModuleByIdFromZoho(modulePath, id, query)
+    await mirrorZohoModuleResponse(modulePath, fresh)
+    return fresh?.code != null ? fresh : body
+  } catch {
+    await mirrorZohoModuleResponse(modulePath, body)
+    return body
+  }
 }
 
 export async function deleteModule(modulePath, id, query = {}) {
   const organizationId = await getOrganizationId()
-  return request('delete', `${modulePath}/${encodeURIComponent(id)}`, {
+  const body = await request('delete', `${modulePath}/${encodeURIComponent(id)}`, {
     params: { organization_id: organizationId, ...query }
   })
+  await deleteMirroredEntity(modulePath, id)
+  return body
 }
 
 /** Zoho Books: POST /items/{id}/inactive — used when hard delete is not allowed (e.g. item on transactions). */
 export async function markZohoItemInactive(itemId) {
   const organizationId = await getOrganizationId()
-  return request('post', `/items/${encodeURIComponent(itemId)}/inactive`, {
+  const body = await request('post', `/items/${encodeURIComponent(itemId)}/inactive`, {
     params: { organization_id: organizationId }
   })
+  try {
+    const fresh = await getModuleByIdFromZoho('/items', itemId)
+    await mirrorZohoModuleResponse('/items', fresh)
+  } catch {
+    /* non-fatal */
+  }
+  return body
 }
 
 export async function uploadInvoiceAttachment(invoiceId, { buffer, mimetype, originalname }) {

@@ -86,6 +86,8 @@ import {
   setCustomerPricingTier,
   updatePricingTier
 } from '../services/customerPricingZohoService.js'
+import { isDynamoConfigured, isDynamoReadsEnabled, isDynamoWritesEnabled, getDynamoTablePrefix } from '../services/dynamo/dynamoClient.js'
+import { runZohoDynamoSyncNow } from '../services/dynamoSyncScheduler.js'
 
 export const adminRoutes = Router()
 
@@ -403,8 +405,37 @@ adminRoutes.get('/zoho-status', async (_req, res, next) => {
     res.json({
       connected: ok,
       organizationId: String(orgId || ''),
-      message: ok ? 'Zoho Books connected' : 'Zoho Books returned an unexpected response'
+      message: ok ? 'Zoho Books connected' : 'Zoho Books returned an unexpected response',
+      dynamodb: {
+        configured: isDynamoConfigured(),
+        writesEnabled: isDynamoWritesEnabled(),
+        readsEnabled: isDynamoReadsEnabled(),
+        tablePrefix: getDynamoTablePrefix() || null,
+        region: env.AWS_REGION || null
+      }
     })
+  } catch (error) {
+    next(error)
+  }
+})
+
+adminRoutes.get('/dynamodb/status', (_req, res) => {
+  res.json({
+    configured: isDynamoConfigured(),
+    writesEnabled: isDynamoWritesEnabled(),
+    readsEnabled: isDynamoReadsEnabled(),
+    tablePrefix: getDynamoTablePrefix() || null,
+    region: env.AWS_REGION || null,
+    syncCronEnabled: Boolean(env.DYNAMODB_SYNC_CRON_ENABLED),
+    design: 'multi-table'
+  })
+})
+
+adminRoutes.post('/dynamodb/sync', async (_req, res, next) => {
+  try {
+    const summary = await runZohoDynamoSyncNow('admin-api')
+    appendAdminAudit({ action: 'admin_dynamodb_sync', meta: { skipped: summary.skipped || false } })
+    res.json(summary)
   } catch (error) {
     next(error)
   }

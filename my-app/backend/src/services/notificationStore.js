@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createLogger, serializeError } from '../util/logger.js'
+import { putNotification } from './dynamo/appDataDynamo.js'
 
 const log = createLogger('notifications')
 
@@ -13,6 +14,11 @@ const MAX_PER_RECIPIENT = 80
 
 function normEmail(value) {
   return String(value || '').trim().toLowerCase()
+}
+
+function mirrorNotification(row) {
+  if (!row?.id) return
+  void putNotification(row).catch((err) => log.error('Dynamo notification mirror failed', serializeError(err)))
 }
 
 function reloadFromDisk() {
@@ -30,7 +36,7 @@ function reloadFromDisk() {
   }
 }
 
-function persist() {
+function persist(changedRows) {
   try {
     const dir = dirname(FILE)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
@@ -38,6 +44,8 @@ function persist() {
   } catch (err) {
     log.error('Notification persist failed', serializeError(err))
   }
+  const rows = Array.isArray(changedRows) ? changedRows : changedRows ? [changedRows] : []
+  for (const row of rows) mirrorNotification(row)
 }
 
 reloadFromDisk()
@@ -86,13 +94,15 @@ export function createNotification({
   notifications.set(row.id, row)
 
   const forRecipient = listNotificationsForRecipient(aud, email)
+  const toMirror = [row]
   if (forRecipient.length > MAX_PER_RECIPIENT) {
     for (const old of forRecipient.slice(MAX_PER_RECIPIENT)) {
       notifications.delete(old.id)
+      toMirror.push(old)
     }
   }
 
-  persist()
+  persist(toMirror)
   return row
 }
 
@@ -112,7 +122,7 @@ export function markNotificationRead(id, audience, recipientEmail) {
   if (row.readAt) return row
   const next = { ...row, readAt: new Date().toISOString() }
   notifications.set(String(id), next)
-  persist()
+  persist(next)
   return next
 }
 
@@ -122,11 +132,14 @@ export function markAllNotificationsRead(audience, recipientEmail) {
   const aud = String(audience || '').trim()
   const now = new Date().toISOString()
   let changed = 0
+  const changedRows = []
   for (const row of notifications.values()) {
     if (String(row.audience) !== aud || normEmail(row.recipientEmail) !== email || row.readAt) continue
-    notifications.set(row.id, { ...row, readAt: now })
+    const next = { ...row, readAt: now }
+    notifications.set(row.id, next)
+    changedRows.push(next)
     changed += 1
   }
-  if (changed > 0) persist()
+  if (changed > 0) persist(changedRows)
   return changed
 }

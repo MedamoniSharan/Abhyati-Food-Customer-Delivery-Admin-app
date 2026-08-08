@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createLogger, serializeError } from '../util/logger.js'
+import { putPaymentRecord } from './dynamo/appDataDynamo.js'
 
 const log = createLogger('payments')
 
@@ -10,12 +11,17 @@ const FILE = join(__dirname, '..', '..', 'data', 'payment-records.json')
 
 const records = new Map()
 
+function mirrorPayment(row) {
+  if (!row?.id) return
+  void putPaymentRecord(row).catch((err) => log.error('Dynamo payment mirror failed', serializeError(err)))
+}
+
 function reloadFromDisk() {
   records.clear()
   load()
 }
 
-function persist() {
+function persist(changedRow) {
   try {
     const dir = dirname(FILE)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
@@ -23,6 +29,7 @@ function persist() {
   } catch (err) {
     log.error('Payment record persist failed', serializeError(err))
   }
+  if (changedRow) mirrorPayment(changedRow)
 }
 
 function load() {
@@ -91,7 +98,7 @@ export function createPendingPaymentRecord({
     updatedAt: new Date().toISOString()
   }
   records.set(id, row)
-  persist()
+  persist(row)
   return row
 }
 
@@ -101,7 +108,7 @@ export function updatePaymentRecord(id, patch) {
   if (!row) return null
   const next = { ...row, ...patch, updatedAt: new Date().toISOString() }
   records.set(String(id), next)
-  persist()
+  persist(next)
   return next
 }
 
