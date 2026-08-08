@@ -182,7 +182,14 @@ export async function updateDriverRecord(currentEmail, { fullName, email, passwo
   return toPublicDriver(fresh)
 }
 
+let driversListCache = null
+let driversListCacheAt = 0
+const DRIVERS_LIST_TTL_MS = 60_000
+
 export async function listDrivers() {
+  if (driversListCache && Date.now() - driversListCacheAt < DRIVERS_LIST_TTL_MS) {
+    return driversListCache
+  }
   const { listContactsDetailBySearchText } = await import('./zohoBooksService.js')
   const { hasDriverAppLoginNotes, DRV_PW_PREFIX } = await import('./zohoAppCredentialNotes.js')
   const wantType = String(env.DRIVER_ZOHO_CONTACT_TYPE || 'customer').toLowerCase()
@@ -191,5 +198,8 @@ export async function listDrivers() {
     contactType: wantType,
     maxPages: 25
   })
-  return fullRows.filter((c) => hasDriverAppLoginNotes(c.notes)).map((c) => toPublicDriver(c))
+  const drivers = fullRows.filter((c) => hasDriverAppLoginNotes(c.notes)).map((c) => toPublicDriver(c))
+  driversListCache = drivers
+  driversListCacheAt = Date.now()
+  return drivers
 }

@@ -94,14 +94,10 @@ export async function listAssignmentsFromZohoForDriver(driverEmail, opts = {}) {
     for (const inv of invoices) {
       const invoiceId = String(inv.invoice_id || '').trim()
       if (!invoiceId) continue
-      let full = inv
-      if (!Object.prototype.hasOwnProperty.call(inv, 'notes')) {
-        const detail = await getModuleById('/invoices', invoiceId)
-        full = { ...inv, ...(detail?.invoice || detail) }
-      }
-      const marker = parseAssignmentFromNotes(full.notes)
+      // Prefer list payload (Dynamo scan cache). Avoid per-invoice Zoho detail GETs on the hot path.
+      const marker = parseAssignmentFromNotes(inv.notes)
       if (!marker || normalizeEmail(marker.driverEmail) !== key) continue
-      const row = zohoInvoiceToAssignmentRow(full, marker)
+      const row = zohoInvoiceToAssignmentRow(inv, marker)
       if (row) rows.push(row)
     }
     return rows

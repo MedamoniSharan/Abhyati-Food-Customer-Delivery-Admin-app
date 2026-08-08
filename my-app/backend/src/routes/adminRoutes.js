@@ -400,6 +400,23 @@ adminRoutes.use(requireAdmin)
 adminRoutes.get('/zoho-status', async (_req, res, next) => {
   try {
     const orgId = await getOrganizationId()
+    // Dynamo reads mean the app is already serving from the mirror — skip a live Zoho list probe.
+    if (isDynamoReadsEnabled()) {
+      res.json({
+        connected: true,
+        organizationId: String(orgId || ''),
+        message: 'Zoho Books connected',
+        dynamodb: {
+          configured: isDynamoConfigured(),
+          writesEnabled: isDynamoWritesEnabled(),
+          readsEnabled: isDynamoReadsEnabled(),
+          tablePrefix: getDynamoTablePrefix() || null,
+          region: env.AWS_REGION || null
+        },
+        source: 'dynamodb'
+      })
+      return
+    }
     const probe = await listModule('/items', { per_page: 1, page: 1 })
     const ok = Number(probe?.code) === 0 || Array.isArray(probe?.items)
     res.json({
@@ -441,23 +458,48 @@ adminRoutes.post('/dynamodb/sync', async (_req, res, next) => {
   }
 })
 
+let overviewCache = null
+let overviewCacheAt = 0
+const OVERVIEW_TTL_MS = 60_000
+
 adminRoutes.get('/overview', async (_req, res, next) => {
   try {
-    const [invData, soData] = await Promise.all([
-      listModule('/invoices', { per_page: 100 }),
-      listModule('/salesorders', { per_page: 100 })
-    ])
-    const invoices = Array.isArray(invData.invoices) ? invData.invoices : []
-    const salesorders = Array.isArray(soData.salesorders) ? soData.salesorders : []
+    if (overviewCache && Date.now() - overviewCacheAt < OVERVIEW_TTL_MS) {
+      res.json(overviewCache)
+      return
+    }
+    // Avoid full-table invoice/SO scans (10k+ rows). Sample when Dynamo reads are on.
+    let invoices = []
+    let salesorders = []
+    if (isDynamoReadsEnabled()) {
+      const { scanLimited } = await import('../services/dynamo/dynamoRepository.js')
+      const { tableNameForEntityType } = await import('../services/dynamo/dynamoClient.js')
+      const [invItems, soItems] = await Promise.all([
+        scanLimited(tableNameForEntityType('invoice'), 100),
+        scanLimited(tableNameForEntityType('salesorder'), 100)
+      ])
+      invoices = invItems.map((i) => i.payload).filter(Boolean)
+      salesorders = soItems.map((i) => i.payload).filter(Boolean)
+    } else {
+      const [invData, soData] = await Promise.all([
+        listModule('/invoices', { per_page: 100 }),
+        listModule('/salesorders', { per_page: 100 })
+      ])
+      invoices = Array.isArray(invData.invoices) ? invData.invoices : []
+      salesorders = Array.isArray(soData.salesorders) ? soData.salesorders : []
+    }
     const revenue = invoices.reduce((s, inv) => s + (Number(inv.total) || 0), 0)
-    res.json({
+    const payload = {
       invoiceCount: invoices.length,
       salesOrderCount: salesorders.length,
       appCustomerCount: await countCustomerAppLoginsInZoho(),
       revenueApprox: revenue,
       currency: env.ZOHO_DEFAULT_CURRENCY_CODE,
       zohoItemCustomerDisplayFieldConfigured: getZohoItemCustomerDisplayFieldId() !== ''
-    })
+    }
+    overviewCache = payload
+    overviewCacheAt = Date.now()
+    res.json(payload)
   } catch (error) {
     next(error)
   }
@@ -597,14 +639,22 @@ adminRoutes.get('/customers', async (req, res, next) => {
 
     const data = await listModule('/contacts', listParams)
     const rows = Array.isArray(data?.contacts) ? data.contacts : []
-    const details = await Promise.all(
-      rows.map(async (row) => {
-        const id = row?.contact_id
-        if (!id) return null
-        const d = await getModuleById('/contacts', String(id))
-        return d?.contact || d
-      })
-    )
+
+    // With Dynamo reads, mirrored contact payloads are already available from the list scan.
+    // Per-row Zoho/Dynamo detail GETs made this endpoint ~7–15s for 8 customers.
+    let details
+    if (isDynamoReadsEnabled()) {
+      details = rows
+    } else {
+      details = await Promise.all(
+        rows.map(async (row) => {
+          const id = row?.contact_id
+          if (!id) return null
+          const d = await getModuleById('/contacts', String(id))
+          return d?.contact || d
+        })
+      )
+    }
 
     let tiersPreload = []
     try {

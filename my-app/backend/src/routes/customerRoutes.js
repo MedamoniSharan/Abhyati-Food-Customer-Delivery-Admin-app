@@ -263,7 +263,12 @@ customerRoutes.get('/orders', async (req, res, next) => {
       email: req.customer.email
     })
     const zohoCustomerId = String(contact?.contact_id || '')
-    const data = await listModule('/invoices', { per_page: 200, ...query })
+    const listParams = {
+      per_page: 200,
+      ...query,
+      ...(zohoCustomerId ? { customer_id: zohoCustomerId } : {})
+    }
+    const data = await listModule('/invoices', listParams)
     const rows = Array.isArray(data?.invoices) ? data.invoices : []
     const invoices = rows.filter((invoice) => invoiceBelongsToAppCustomer(invoice, email, zohoCustomerId))
     const { invoices: hydratedInvoices } = await hydrateInvoicesWithLineItems(invoices)
@@ -286,7 +291,12 @@ customerRoutes.get('/invoices', async (req, res, next) => {
       email: req.customer.email
     })
     const zohoCustomerId = String(contact?.contact_id || '')
-    const data = await listModule('/invoices', { per_page: 200, ...query })
+    const listParams = {
+      per_page: 200,
+      ...query,
+      ...(zohoCustomerId ? { customer_id: zohoCustomerId } : {})
+    }
+    const data = await listModule('/invoices', listParams)
     const invoices = (Array.isArray(data?.invoices) ? data.invoices : []).filter((invoice) =>
       invoiceBelongsToAppCustomer(invoice, email, zohoCustomerId)
     )

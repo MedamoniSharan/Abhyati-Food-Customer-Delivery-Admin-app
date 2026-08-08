@@ -263,9 +263,10 @@ export async function getModuleById(modulePath, id, query = {}) {
 }
 
 /**
- * List contacts whose name or notes match search_text, then GET each by id (list payload often omits `notes`).
+ * List contacts whose name or notes match search_text.
+ * With Dynamo reads: one cached scan + in-memory filter (no per-row detail GETs).
  * @param {{ searchText: string, contactType?: string, maxPages?: number }} opts
- * @returns {Promise<object[]>} Full contact objects (detail) matching contactType.
+ * @returns {Promise<object[]>}
  */
 export async function listContactsDetailBySearchText({ searchText, contactType = 'customer', maxPages = 25 }) {
   const want = String(contactType || 'customer').toLowerCase()
@@ -274,8 +275,32 @@ export async function listContactsDetailBySearchText({ searchText, contactType =
   const search = String(searchText || '').slice(0, 100)
   if (!search) return out
 
+  if (isDynamoReadsEnabled()) {
+    try {
+      // One page with a large per_page still uses the full cached scan under Dynamo.
+      const data = await listModule('/contacts', {
+        search_text: search,
+        contact_type: want,
+        per_page: 200,
+        page: 1
+      })
+      const arr = Array.isArray(data?.contacts) ? data.contacts : []
+      for (const row of arr) {
+        const id = row?.contact_id
+        if (!id || seen.has(id)) continue
+        if (String(row.contact_type || '').toLowerCase() !== want) continue
+        seen.add(id)
+        out.push(row)
+      }
+      // Dynamo list returns the full filtered set in page 1 when scanning; no multi-page N+1.
+      if (out.length || data) return out
+    } catch (err) {
+      log.warn('Dynamo contact search failed; falling back to Zoho walk', serializeError(err))
+    }
+  }
+
   for (let page = 1; page <= maxPages; page += 1) {
-    const data = await listModule('/contacts', { search_text: search, per_page: 200, page })
+    const data = await listModuleFromZoho('/contacts', { search_text: search, per_page: 200, page })
     const arr = Array.isArray(data?.contacts) ? data.contacts : []
     if (arr.length === 0) break
 

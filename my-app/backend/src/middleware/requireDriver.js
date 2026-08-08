@@ -2,6 +2,9 @@ import { parseDriverPasswordHashFromNotes } from '../services/zohoAppCredentialN
 import { getModuleById } from '../services/zohoBooksService.js'
 import { verifyDriverToken } from '../services/jwtService.js'
 
+const activeDriverCache = new Map()
+const ACTIVE_DRIVER_TTL_MS = 45_000
+
 export function requireDriver(req, _res, next) {
   try {
     const auth = req.headers.authorization || ''
@@ -32,24 +35,40 @@ export async function requireActiveDriver(req, res, next) {
       err.statusCode = 401
       return next(err)
     }
+
+    const cacheKey = `${id}|${email}`
+    const cached = activeDriverCache.get(cacheKey)
+    if (cached && Date.now() - cached.at < ACTIVE_DRIVER_TTL_MS) {
+      if (!cached.ok) {
+        const err = new Error(cached.message || 'Unauthorized')
+        err.statusCode = cached.statusCode || 401
+        return next(err)
+      }
+      return next()
+    }
+
     const data = await getModuleById('/contacts', id)
     const c = data?.contact || data
     if (!c?.contact_id || parseDriverPasswordHashFromNotes(c.notes) == null) {
+      activeDriverCache.set(cacheKey, { at: Date.now(), ok: false, statusCode: 401, message: 'Account no longer exists' })
       const err = new Error('Account no longer exists')
       err.statusCode = 401
       return next(err)
     }
     if (c.is_active === false || c.is_active === 'false') {
+      activeDriverCache.set(cacheKey, { at: Date.now(), ok: false, statusCode: 401, message: 'Account inactive' })
       const err = new Error('Account inactive')
       err.statusCode = 401
       return next(err)
     }
     const contactEmail = String(c.email || '').trim().toLowerCase()
     if (contactEmail && contactEmail !== email) {
+      activeDriverCache.set(cacheKey, { at: Date.now(), ok: false, statusCode: 401, message: 'Invalid session' })
       const err = new Error('Invalid session')
       err.statusCode = 401
       return next(err)
     }
+    activeDriverCache.set(cacheKey, { at: Date.now(), ok: true })
     next()
   } catch (err) {
     next(err)

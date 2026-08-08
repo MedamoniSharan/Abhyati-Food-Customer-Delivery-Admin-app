@@ -267,7 +267,14 @@ export async function getCustomerUserByEmail(email) {
 }
 
 /** Count Zoho customer contacts that have a customer app password in notes. */
+let appLoginCountCache = null
+let appLoginCountCacheAt = 0
+const APP_LOGIN_COUNT_TTL_MS = 60_000
+
 export async function countCustomerAppLoginsInZoho() {
+  if (appLoginCountCache != null && Date.now() - appLoginCountCacheAt < APP_LOGIN_COUNT_TTL_MS) {
+    return appLoginCountCache
+  }
   const rows = await listContactsDetailBySearchText({ searchText: CUST_PW_PREFIX, contactType: 'customer', maxPages: 25 })
   let n = 0
   for (const c of rows) {
@@ -275,6 +282,8 @@ export async function countCustomerAppLoginsInZoho() {
     if (c.is_active === false || c.is_active === 'false') continue
     if (hasCustomerAppLoginNotes(c.notes)) n += 1
   }
+  appLoginCountCache = n
+  appLoginCountCacheAt = Date.now()
   return n
 }
 

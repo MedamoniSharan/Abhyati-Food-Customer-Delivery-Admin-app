@@ -6,7 +6,10 @@
 - Prefix `Abhyati` → tables like `Abhyati_contacts`, `Abhyati_items`, `Abhyati_invoices`, …
 - **Writes:** Zoho Books first, then mirror into the matching Dynamo table.
 - **Reads:** When `DYNAMODB_READS=true`, list/get use Dynamo (Zoho fallback on miss/error).
+- **List performance:** Full-table scans are cached in-process (~5 min, `DYNAMODB_SCAN_CACHE_TTL_MS`). Admin/customer item lists skip Zoho per-row hydration when Dynamo reads are on. Boot warms `items` + `contacts` only (invoice/SO tables are large and load on demand).
 - **Daily sync:** `node-cron` on Render at **18:00 Asia/Kolkata**.
+- **Item custom fields:** Set `ZOHO_SYNC_ITEM_DETAILS=true` (once or on cron) so item mirrors include `custom_fields` for admin virtuals without per-row Zoho GETs.
+- **Contact details:** Set `ZOHO_SYNC_CONTACT_DETAILS=true` so customer/driver notes land in Dynamo for app-login detection.
 
 ## Tables
 
@@ -38,6 +41,8 @@ DYNAMODB_TABLE_PREFIX=Abhyati
 DYNAMODB_ENABLED=true
 DYNAMODB_READS=true
 DYNAMODB_SYNC_CRON_ENABLED=true
+# optional: DYNAMODB_SCAN_CACHE_TTL_MS=60000
+# optional: ZOHO_SYNC_ITEM_DETAILS=true
 ```
 
 ```bash

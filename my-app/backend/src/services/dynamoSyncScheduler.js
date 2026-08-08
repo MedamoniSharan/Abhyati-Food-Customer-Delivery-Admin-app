@@ -1,13 +1,39 @@
 import cron from 'node-cron'
 import { env } from '../config/env.js'
 import { createLogger, serializeError } from '../util/logger.js'
-import { isDynamoConfigured, isDynamoWritesEnabled } from './dynamo/dynamoClient.js'
+import { isDynamoConfigured, isDynamoReadsEnabled, isDynamoWritesEnabled, tableNameForEntityType } from './dynamo/dynamoClient.js'
+import { scanAll } from './dynamo/dynamoRepository.js'
 import { syncZohoBooksToDynamo } from './dynamo/zohoDynamoSyncService.js'
 
 const log = createLogger('dynamo-sync-cron')
 
 let scheduled = false
 let running = false
+
+/** Prefetch hot table scans so admin/customer list pages are warm after boot.
+ * Skip invoices/salesorders here — those tables are huge (10k+ rows) and block the process;
+ * they still cache on first list request.
+ */
+export function warmDynamoListCaches() {
+  if (!isDynamoReadsEnabled()) return
+  const tables = ['item', 'contact']
+  void Promise.all(
+    tables.map(async (entityType) => {
+      const tableName = tableNameForEntityType(entityType)
+      const started = Date.now()
+      try {
+        const items = await scanAll(tableName)
+        log.info('Warmed Dynamo scan cache', {
+          tableName,
+          rows: items.length,
+          ms: Date.now() - started
+        })
+      } catch (err) {
+        log.warn('Dynamo scan warm failed', { tableName, ...serializeError(err) })
+      }
+    })
+  )
+}
 
 export async function runZohoDynamoSyncNow(reason = 'manual') {
   if (!isDynamoWritesEnabled()) {

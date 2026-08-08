@@ -72,7 +72,7 @@ async function syncModulePages(modulePath, { maxPages = 500, detailFetch = false
 
     let entities = unique.map((u) => u.row)
     if (detailFetch && unique.length) {
-      log.info('Fetching contact details', { modulePath, page, count: unique.length })
+      log.info('Fetching entity details', { modulePath, page, count: unique.length })
       entities = await mapPool(unique, DETAIL_CONCURRENCY, async ({ id, row }) => {
         try {
           const detail = await getModuleByIdFromZoho(modulePath, id)
@@ -91,6 +91,7 @@ async function syncModulePages(modulePath, { maxPages = 500, detailFetch = false
       modulePath,
       page,
       pageRows: pageRows.length,
+      detailFetch,
       fetchedTotal: fetched,
       writtenTotal: written
     })
@@ -107,7 +108,8 @@ async function syncModulePages(modulePath, { maxPages = 500, detailFetch = false
  */
 export async function syncZohoBooksToDynamo({
   modules = SYNC_MODULES,
-  detailForContacts = process.env.ZOHO_SYNC_CONTACT_DETAILS === 'true'
+  detailForContacts = process.env.ZOHO_SYNC_CONTACT_DETAILS === 'true',
+  detailForItems = process.env.ZOHO_SYNC_ITEM_DETAILS === 'true'
 } = {}) {
   if (!isDynamoWritesEnabled()) {
     return { ok: false, skipped: true, reason: 'DynamoDB not enabled' }
@@ -119,10 +121,12 @@ export async function syncZohoBooksToDynamo({
   for (const modulePath of modules) {
     const entityType = entityTypeFromModulePath(modulePath)
     try {
-      const detailFetch = detailForContacts && modulePath === '/contacts'
+      const detailFetch =
+        (detailForContacts && modulePath === '/contacts') ||
+        (detailForItems && modulePath === '/items')
       log.info('Syncing module', { modulePath, detailFetch })
       const { fetched, written } = await syncModulePages(modulePath, { detailFetch })
-      results.push({ modulePath, entityType, fetched, written })
+      results.push({ modulePath, entityType, fetched, written, detailFetch })
       log.info('Module sync done', { modulePath, fetched, written })
     } catch (err) {
       log.error('Module sync failed', { modulePath, ...serializeError(err) })

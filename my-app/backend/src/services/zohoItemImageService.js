@@ -1,8 +1,33 @@
-import axios from 'axios'
+import { Readable } from 'node:stream'
 import { env } from '../config/env.js'
 import { getOrganizationId } from './zohoBooksService.js'
 import { resolveZohoAccessToken } from './zohoTokenProvider.js'
 import { zohoAxios } from './zohoRateLimit.js'
+
+/** In-memory image cache so product grids don't re-hit Zoho for every thumbnail. */
+const imageCache = new Map()
+const IMAGE_TTL_MS = Math.max(60_000, Number(process.env.ITEM_IMAGE_CACHE_TTL_MS) || 30 * 60_000)
+const IMAGE_NEG_TTL_MS = Math.max(15_000, Number(process.env.ITEM_IMAGE_NEG_CACHE_TTL_MS) || 5 * 60_000)
+const IMAGE_MAX_ENTRIES = Math.max(50, Number(process.env.ITEM_IMAGE_CACHE_MAX) || 400)
+
+function cacheGet(itemId) {
+  const row = imageCache.get(String(itemId))
+  if (!row) return null
+  const ttl = row.ok ? IMAGE_TTL_MS : IMAGE_NEG_TTL_MS
+  if (Date.now() - row.at > ttl) {
+    imageCache.delete(String(itemId))
+    return null
+  }
+  return row
+}
+
+function cacheSet(itemId, entry) {
+  if (imageCache.size >= IMAGE_MAX_ENTRIES) {
+    const first = imageCache.keys().next().value
+    if (first != null) imageCache.delete(first)
+  }
+  imageCache.set(String(itemId), { ...entry, at: Date.now() })
+}
 
 /**
  * POST multipart image to Zoho Books for an item (same catalog as GET …/image).
@@ -61,17 +86,13 @@ export async function uploadItemImageToZoho(itemId, { buffer, mimetype, original
     throw err
   }
 
+  imageCache.delete(String(itemId))
   return { ok: true, data }
 }
 
-/**
- * Streams item image bytes from Zoho Books (no local persistence).
- * GET {ZOHO_BOOKS_BASE_URL}/items/{item_id}/image?organization_id=...
- */
-export async function streamItemImageFromZoho(itemId) {
+async function fetchItemImageBuffer(itemId) {
   const organizationId = await getOrganizationId()
   const accessToken = await resolveZohoAccessToken()
-
   const url = `${env.ZOHO_BOOKS_BASE_URL}/items/${encodeURIComponent(itemId)}/image`
 
   const zohoResponse = await zohoAxios({
@@ -79,7 +100,7 @@ export async function streamItemImageFromZoho(itemId) {
     url,
     params: { organization_id: organizationId },
     headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
-    responseType: 'stream',
+    responseType: 'arraybuffer',
     validateStatus: () => true,
     timeout: 60_000
   })
@@ -92,9 +113,6 @@ export async function streamItemImageFromZoho(itemId) {
   }
 
   if (status < 200 || status >= 300) {
-    if (zohoResponse.data && typeof zohoResponse.data.destroy === 'function') {
-      zohoResponse.data.destroy()
-    }
     return {
       ok: false,
       status: 500,
@@ -104,9 +122,49 @@ export async function streamItemImageFromZoho(itemId) {
 
   return {
     ok: true,
-    stream: zohoResponse.data,
+    buffer: Buffer.from(zohoResponse.data),
     contentType,
     contentLength: zohoResponse.headers['content-length']
+  }
+}
+
+/**
+ * Streams item image bytes (cached in memory after first successful Zoho fetch).
+ */
+export async function streamItemImageFromZoho(itemId) {
+  const id = String(itemId || '').trim()
+  if (!id) return { ok: false, status: 400, message: 'Missing item id' }
+
+  const cached = cacheGet(id)
+  if (cached) {
+    if (!cached.ok) {
+      return { ok: false, status: cached.status || 404, message: cached.message || 'Image not found' }
+    }
+    return {
+      ok: true,
+      stream: Readable.from(cached.buffer),
+      contentType: cached.contentType,
+      contentLength: String(cached.buffer.length)
+    }
+  }
+
+  const fetched = await fetchItemImageBuffer(id)
+  if (!fetched.ok) {
+    cacheSet(id, { ok: false, status: fetched.status, message: fetched.message })
+    return fetched
+  }
+
+  cacheSet(id, {
+    ok: true,
+    buffer: fetched.buffer,
+    contentType: fetched.contentType
+  })
+
+  return {
+    ok: true,
+    stream: Readable.from(fetched.buffer),
+    contentType: fetched.contentType,
+    contentLength: String(fetched.buffer.length)
   }
 }
 
@@ -116,6 +174,9 @@ export async function streamItemImageFromZoho(itemId) {
  */
 export async function probeZohoItemImageExists(itemId) {
   if (!itemId || !String(itemId).trim()) return false
+  const cached = cacheGet(String(itemId).trim())
+  if (cached) return Boolean(cached.ok)
+
   const organizationId = await getOrganizationId()
   const accessToken = await resolveZohoAccessToken()
   const url = `${env.ZOHO_BOOKS_BASE_URL}/items/${encodeURIComponent(String(itemId).trim())}/image`
@@ -130,26 +191,23 @@ export async function probeZohoItemImageExists(itemId) {
       timeout: 20_000
     })
     if (headRes.status >= 200 && headRes.status < 300) return true
-    if (headRes.status === 404) return false
+    if (headRes.status === 404) {
+      cacheSet(String(itemId).trim(), { ok: false, status: 404, message: 'Image not found' })
+      return false
+    }
   } catch {
     // continue to GET
   }
 
-  const zohoResponse = await zohoAxios({
-    method: 'GET',
-    url,
-    params: { organization_id: organizationId },
-    headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
-    responseType: 'stream',
-    validateStatus: () => true,
-    timeout: 45_000
-  })
-
-  const status = zohoResponse.status
-  if (zohoResponse.data && typeof zohoResponse.data.destroy === 'function') {
-    zohoResponse.data.destroy()
+  const fetched = await fetchItemImageBuffer(String(itemId).trim())
+  if (!fetched.ok) {
+    cacheSet(String(itemId).trim(), { ok: false, status: fetched.status, message: fetched.message })
+    return false
   }
-
-  if (status === 404) return false
-  return status >= 200 && status < 300
+  cacheSet(String(itemId).trim(), {
+    ok: true,
+    buffer: fetched.buffer,
+    contentType: fetched.contentType
+  })
+  return true
 }

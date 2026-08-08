@@ -1,4 +1,5 @@
 import { getModuleById } from './zohoBooksService.js'
+import { isDynamoReadsEnabled } from './dynamo/dynamoClient.js'
 
 function invoiceNeedsLineItemHydration(invoice) {
   const lines = invoice?.line_items
@@ -7,13 +8,17 @@ function invoiceNeedsLineItemHydration(invoice) {
 
 /**
  * Zoho invoice list rows often omit line_items; fetch detail for those rows.
+ * With Dynamo reads, skip Zoho/detail N+1 (mirrors are used as-is).
  * @param {unknown[]} invoices
- * @param {{ concurrency?: number }} [opts]
+ * @param {{ concurrency?: number, dynamoOnly?: boolean }} [opts]
  */
-export async function hydrateInvoicesWithLineItems(invoices, { concurrency = 4 } = {}) {
+export async function hydrateInvoicesWithLineItems(invoices, { concurrency = 4, dynamoOnly } = {}) {
   if (!Array.isArray(invoices) || invoices.length === 0) {
     return { invoices: [], detail_fetches: 0 }
   }
+
+  const skipRemote = dynamoOnly ?? isDynamoReadsEnabled()
+  if (skipRemote) return { invoices, detail_fetches: 0 }
 
   const needIdx = []
   for (let i = 0; i < invoices.length; i += 1) {

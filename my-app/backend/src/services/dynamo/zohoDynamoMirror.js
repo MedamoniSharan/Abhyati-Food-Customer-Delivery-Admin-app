@@ -153,7 +153,15 @@ function applyGenericFilters(rows, query = {}) {
   }
   if (query.search_text) {
     const frag = String(query.search_text).trim().toLowerCase()
-    out = out.filter((r) => JSON.stringify(r).toLowerCase().includes(frag))
+    out = out.filter((r) => {
+      const name = String(r.name || r.item_name || r.contact_name || '')
+      const sku = String(r.sku || r.rate || '')
+      const desc = String(r.description || r.purchase_description || '')
+      const id = String(
+        r.item_id || r.invoice_id || r.salesorder_id || r.payment_id || r.contact_id || r.id || ''
+      )
+      return `${name} ${sku} ${desc} ${id}`.toLowerCase().includes(frag)
+    })
   }
   return out
 }

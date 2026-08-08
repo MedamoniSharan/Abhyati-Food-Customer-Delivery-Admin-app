@@ -7,6 +7,7 @@ import {
   getZohoItemCustomerDisplayFieldId,
   itemListRowNeedsCustomerProductNameHydration
 } from './zohoItemCustomerDisplay.js'
+import { isDynamoReadsEnabled } from './dynamo/dynamoClient.js'
 
 const categoryEntrySchema = z.object({
   id: z.string().min(1).max(80),
@@ -17,7 +18,7 @@ export const productCategoriesArraySchema = z.array(categoryEntrySchema)
 
 let categoriesCache = null
 let categoriesCacheAt = 0
-const CATEGORIES_TTL_MS = 30_000
+const CATEGORIES_TTL_MS = Math.max(30_000, Number(process.env.PRODUCT_CATEGORIES_CACHE_TTL_MS) || 300_000)
 
 /** Zoho Books may return `customfield_id` or `customfieldid` on contact payloads. */
 function zohoCfRowId(row) {
@@ -176,12 +177,13 @@ export function itemListRowNeedsProductCategoryHydration(item) {
  *   concurrency?: number
  *   hydrateCategory?: boolean
  *   hydrateCustomerName?: boolean
+ *   dynamoOnly?: boolean
  * }} [opts]
  * @returns {Promise<{ items: unknown[], detail_fetches: number }>}
  */
 export async function hydrateItemsListRowsForProductCategoryField(
   items,
-  { concurrency = 4, hydrateCategory = true, hydrateCustomerName = true } = {}
+  { concurrency = 4, hydrateCategory = true, hydrateCustomerName = true, dynamoOnly } = {}
 ) {
   const wantCategory = hydrateCategory && isProductCategoryConfigured()
   const wantCustomerName = hydrateCustomerName && Boolean(getZohoItemCustomerDisplayFieldId())
@@ -201,6 +203,15 @@ export async function hydrateItemsListRowsForProductCategoryField(
   if (needIdx.length === 0) return { items, detail_fetches: 0 }
 
   const out = items.slice()
+  const useDynamoOnly = dynamoOnly ?? isDynamoReadsEnabled()
+
+  // With Dynamo reads, list rows already are the mirrored payloads. Re-fetching the same
+  // ids (or falling back to Zoho detail) made admin /items take ~8–10s per page.
+  // If mirrors were detail-synced, custom_fields are already present and needIdx is empty.
+  if (useDynamoOnly) {
+    return { items: out, detail_fetches: 0 }
+  }
+
   const n = Math.max(1, Math.min(32, Number(concurrency) || 4))
   let cursor = 0
 

@@ -13,7 +13,11 @@ export { applyCustomerPrice, parseTiersJson } from './customerPricingMath.js'
 
 let tiersCache = null
 let tiersCacheAt = 0
-const TIERS_TTL_MS = 30_000
+const TIERS_TTL_MS = Math.max(30_000, Number(process.env.PRICING_TIERS_CACHE_TTL_MS) || 300_000)
+
+/** @type {Map<string, { at: number, tier: unknown }>} */
+const tierByEmailCache = new Map()
+const TIER_EMAIL_TTL_MS = Math.max(15_000, Number(process.env.CUSTOMER_TIER_CACHE_TTL_MS) || 120_000)
 
 export function isCustomerPricingConfigured() {
   const a = String(env.ZOHO_PRICING_TIERS_CONTACT_ID || '').trim()
@@ -25,6 +29,7 @@ export function isCustomerPricingConfigured() {
 export function invalidatePricingTierCache() {
   tiersCache = null
   tiersCacheAt = 0
+  tierByEmailCache.clear()
 }
 
 function normEmail(email) {
@@ -133,10 +138,20 @@ export async function getActiveTierForContact(contact) {
 }
 
 export async function getActiveTierForCustomerEmail(email) {
-  const listed = await findCustomerByEmail(normEmail(email))
-  if (!listed?.contact_id) return null
+  const key = normEmail(email)
+  if (!key) return null
+  const hit = tierByEmailCache.get(key)
+  if (hit && Date.now() - hit.at < TIER_EMAIL_TTL_MS) return hit.tier
+
+  const listed = await findCustomerByEmail(key)
+  if (!listed?.contact_id) {
+    tierByEmailCache.set(key, { at: Date.now(), tier: null })
+    return null
+  }
   const full = await getContactById(String(listed.contact_id))
-  return getActiveTierForContact(full)
+  const tier = await getActiveTierForContact(full)
+  tierByEmailCache.set(key, { at: Date.now(), tier })
+  return tier
 }
 
 export function resolvePricingTierDisplay(contact, tiersList) {

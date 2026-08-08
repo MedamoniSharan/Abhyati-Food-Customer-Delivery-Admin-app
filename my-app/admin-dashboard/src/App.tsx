@@ -1240,7 +1240,7 @@ export default function App() {
                       ? hasCustomerBulkEditChanges
                         ? 'Bulk edit mode — unsaved changes on this page'
                         : 'Bulk edit mode — edit cells inline, then save'
-                      : `~${customersMeta.total} in Zoho · this page ${customerRows.length}${
+                      : `~${customersMeta.total} customers · this page ${customerRows.length}${
                           customerCategoryFilter ? ' · category filter applies to this Zoho page only' : ''
                         }`}
                   </span>
@@ -1300,7 +1300,7 @@ export default function App() {
                   </label>
                 </div>
               {customersLoading && customerRows.length === 0 ? (
-                <AdminBlockLoader label="Loading customers from Zoho…" />
+                <AdminBlockLoader label="Loading customers…" />
               ) : (
                 <div className="admin-busy-host" style={{ minHeight: customerRows.length > 0 ? 120 : 0 }}>
                   {customersLoading && customerRows.length > 0 ? <AdminBusyOverlay label="Updating customers…" /> : null}

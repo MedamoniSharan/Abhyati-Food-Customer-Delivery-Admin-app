@@ -4,11 +4,13 @@ import {
   hydrateItemsListRowsForProductCategoryField,
   isProductCategoryConfigured
 } from './productCategoryZohoService.js'
+import { isDynamoReadsEnabled, tableNameForEntityType } from './dynamo/dynamoClient.js'
+import { scanAll } from './dynamo/dynamoRepository.js'
 import { createLogger } from '../util/logger.js'
 
 const log = createLogger('item-category-index')
 
-const TTL_MS = Math.max(60_000, Number(process.env.ITEM_CATEGORY_INDEX_TTL_MS) || 5 * 60_000)
+const TTL_MS = Math.max(60_000, Number(process.env.ITEM_CATEGORY_INDEX_TTL_MS) || 10 * 60_000)
 const MAX_PAGES = Math.max(1, Number(process.env.ITEM_CATEGORY_INDEX_MAX_PAGES) || 40)
 const PER_PAGE = 200
 const LIST_CONCURRENCY = 3
@@ -38,10 +40,55 @@ function rowItemId(item) {
   return String(raw).trim()
 }
 
+function indexFromRows(rows) {
+  const itemsById = new Map()
+  /** @type {Map<string, string[]>} */
+  const idsByCategory = new Map()
+  const orderedIds = []
+
+  for (const row of rows) {
+    const id = rowItemId(row)
+    if (!id || itemsById.has(id)) continue
+    itemsById.set(id, row)
+    orderedIds.push(id)
+    const cat = getItemCatalogCategoryForCustomerFilter(row).trim().toLowerCase()
+    const key = cat || 'catalog'
+    const list = idsByCategory.get(key)
+    if (list) list.push(id)
+    else idsByCategory.set(key, [id])
+  }
+
+  return {
+    builtAt: Date.now(),
+    itemsById,
+    idsByCategory,
+    orderedIds
+  }
+}
+
 /**
  * @returns {Promise<CategoryIndex>}
  */
 async function buildItemCategoryIndex() {
+  // Dynamo: one cached table scan — no paging loop / Zoho walk.
+  if (isDynamoReadsEnabled()) {
+    try {
+      const items = await scanAll(tableNameForEntityType('item'))
+      const rows = items.map((i) => i.payload).filter(Boolean)
+      const index = indexFromRows(rows)
+      log.info('Built item category index (dynamo scan)', {
+        items: index.orderedIds.length,
+        categories: index.idsByCategory.size,
+        ttlMs: TTL_MS
+      })
+      return index
+    } catch (err) {
+      log.warn('Dynamo category index build failed; falling back to list pages', {
+        errMessage: err instanceof Error ? err.message : String(err)
+      })
+    }
+  }
+
   const itemsById = new Map()
   /** @type {Map<string, string[]>} */
   const idsByCategory = new Map()
