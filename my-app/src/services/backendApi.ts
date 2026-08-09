@@ -311,17 +311,28 @@ export async function fetchOrderProofAsset(
   if (!invoiceId) return null
   logApiCandidatesOnce(API_BASE_URL_CANDIDATES)
   const token = readAuthToken()
-  const path = `/api/customer/orders/${encodeURIComponent(invoiceId)}/proof/${kind}`
+  const paths =
+    kind === 'photo'
+      ? [
+          `/api/customer/orders/${encodeURIComponent(invoiceId)}/proof/photo`,
+          // Fallback to download endpoint (same bytes, attachment disposition).
+          `/api/customer/orders/${encodeURIComponent(invoiceId)}/proof`,
+        ]
+      : [`/api/customer/orders/${encodeURIComponent(invoiceId)}/proof/signature`]
+
   for (const baseUrl of API_BASE_URL_CANDIDATES) {
-    try {
-      const url = `${baseUrl.replace(/\/$/, '')}${path}`
-      const headers = new Headers()
-      if (token) headers.set('Authorization', `Bearer ${token}`)
-      const response = await fetch(url, { headers })
-      if (!response.ok) continue
-      return await response.blob()
-    } catch {
-      /* try next base */
+    for (const path of paths) {
+      try {
+        const url = `${baseUrl.replace(/\/$/, '')}${path}`
+        const headers = new Headers()
+        if (token) headers.set('Authorization', `Bearer ${token}`)
+        const response = await fetch(url, { headers })
+        if (!response.ok) continue
+        const blob = await response.blob()
+        if (blob.size > 0 && !String(blob.type || '').includes('json')) return blob
+      } catch {
+        /* try next */
+      }
     }
   }
   return null

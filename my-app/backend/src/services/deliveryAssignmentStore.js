@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createLogger, serializeError } from '../util/logger.js'
-import { putAssignment } from './dynamo/appDataDynamo.js'
+import { listAppRecords, putAssignment } from './dynamo/appDataDynamo.js'
 
 const log = createLogger('delivery')
 
@@ -62,6 +62,60 @@ load()
 export function listAssignments() {
   reloadAssignmentsFromDisk()
   return [...assignments.values()]
+}
+
+function assignmentFreshness(row) {
+  if (!row) return ''
+  if (row.proof) return `2:${row.updatedAt || row.deliveredAt || row.createdAt || ''}`
+  if (String(row.status || '').toLowerCase() === 'delivered') {
+    return `1:${row.updatedAt || row.deliveredAt || row.createdAt || ''}`
+  }
+  return `0:${row.updatedAt || row.createdAt || ''}`
+}
+
+function preferAssignmentRow(a, b) {
+  if (!a) return b
+  if (!b) return a
+  return assignmentFreshness(a) >= assignmentFreshness(b) ? a : b
+}
+
+/**
+ * Local JSON can lag multi-instance / crash mid-write. Merge Dynamo payloads so
+ * customer proof preview and order status see delivered + invoice photo.
+ */
+export async function listAssignmentsMerged() {
+  const local = listAssignments()
+  let remote = []
+  try {
+    const rows = await listAppRecords('assignment')
+    if (Array.isArray(rows)) remote = rows.filter((r) => r?.id && r?.invoiceId)
+  } catch (err) {
+    log.warn('Dynamo assignment list failed', serializeError(err))
+  }
+
+  const byInvoice = new Map()
+  for (const row of [...local, ...remote]) {
+    const inv = String(row.invoiceId || '').trim()
+    if (!inv) continue
+    byInvoice.set(inv, preferAssignmentRow(byInvoice.get(inv), row))
+  }
+
+  // Pull fresher Dynamo rows back onto disk so subsequent sync reads stay correct.
+  for (const row of byInvoice.values()) {
+    const localRow = local.find((a) => String(a.invoiceId) === String(row.invoiceId))
+    if (!localRow || assignmentFreshness(row) > assignmentFreshness(localRow)) {
+      upsertAssignmentRow(row, { allowReplace: true })
+    }
+  }
+
+  return [...byInvoice.values()]
+}
+
+export async function getAssignmentForInvoice(invoiceId) {
+  const id = String(invoiceId || '').trim()
+  if (!id) return null
+  const merged = await listAssignmentsMerged()
+  return merged.find((row) => String(row.invoiceId) === id) || null
 }
 
 export function listAssignmentsForDriver(driverEmail) {

@@ -1,7 +1,8 @@
-import { getAssignmentById, listAssignments } from './deliveryAssignmentStore.js'
+import { getAssignmentById, listAssignments, getAssignmentForInvoice } from './deliveryAssignmentStore.js'
 import {
   fetchZohoProofPhoto,
-  fetchZohoProofSignature
+  fetchZohoProofSignature,
+  getInvoiceDocumentFile
 } from './zohoDeliveryProofService.js'
 
 export function findAssignmentByInvoiceId(invoiceId) {
@@ -9,13 +10,39 @@ export function findAssignmentByInvoiceId(invoiceId) {
   return listAssignments().find((row) => String(row.invoiceId) === id) || null
 }
 
+export async function findAssignmentByInvoiceIdAsync(invoiceId) {
+  return getAssignmentForInvoice(invoiceId)
+}
+
 export async function resolveProofPhotoResponse(assignment) {
-  const zohoPhoto = await fetchZohoProofPhoto(assignment?.invoiceId)
-  if (zohoPhoto) {
+  const invoiceId = assignment?.invoiceId
+  // Prefer the exact signed-invoice document id when Zoho stored it on the proof record.
+  const docId =
+    assignment?.proof?.zoho?.photo?.documents?.[0]?.document_id ||
+    assignment?.proof?.zoho?.documents?.[0]?.document_id ||
+    null
+
+  if (docId && invoiceId) {
+    try {
+      const fromDoc = await getInvoiceDocumentFile(invoiceId, docId)
+      if (fromDoc?.data?.length) {
+        return {
+          data: fromDoc.data,
+          contentType: fromDoc.contentType || assignment?.proof?.mimeType || 'image/jpeg',
+          fileName: assignment?.proof?.fileName || fromDoc.fileName || 'signed-invoice.jpg'
+        }
+      }
+    } catch {
+      /* fall through to invoice attachment */
+    }
+  }
+
+  const zohoPhoto = await fetchZohoProofPhoto(invoiceId)
+  if (zohoPhoto?.data?.length) {
     return {
       data: zohoPhoto.data,
-      contentType: zohoPhoto.contentType,
-      fileName: assignment?.proof?.fileName || zohoPhoto.fileName
+      contentType: zohoPhoto.contentType || assignment?.proof?.mimeType || 'image/jpeg',
+      fileName: assignment?.proof?.fileName || zohoPhoto.fileName || 'signed-invoice.jpg'
     }
   }
   if (!assignment?.proof) return null

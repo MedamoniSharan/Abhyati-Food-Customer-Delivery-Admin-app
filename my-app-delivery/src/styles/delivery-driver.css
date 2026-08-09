@@ -101,6 +101,7 @@
 }
 
 .driver-app .dd-pod-screen {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -1085,6 +1086,26 @@
   justify-content: center;
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(2px);
+}
+
+.driver-app .dd-loader-overlay--pod {
+  position: absolute;
+  z-index: 300;
+}
+
+.driver-app .dd-accent-btn--loading {
+  opacity: 0.92;
+  pointer-events: none;
+}
+
+.driver-app .dd-btn-spin {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: dd-spin 0.7s linear infinite;
+  flex-shrink: 0;
 }
 
 .driver-app .dd-loader-card {

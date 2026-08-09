@@ -6,10 +6,11 @@ type Props = {
   onTrackOrder: (order: Order) => void
   onViewDetails: (order: Order) => void
   onInvoice: (order: Order) => void
+  onPreviewProof?: (order: Order) => void
   onReorder: (order: Order) => void
 }
 
-export function OrderCard({ order, onTrackOrder, onViewDetails, onInvoice, onReorder }: Props) {
+export function OrderCard({ order, onTrackOrder, onViewDetails, onInvoice, onPreviewProof, onReorder }: Props) {
   const statusLabel =
     order.status === 'Processing' ? 'Preparing your order' : order.status === 'Shipped' ? 'Out for delivery' : 'Delivered'
 
@@ -45,9 +46,15 @@ export function OrderCard({ order, onTrackOrder, onViewDetails, onInvoice, onReo
 
       {order.status === 'Delivered' ? (
         <div className="delivered-actions">
+          {order.proofAvailable && onPreviewProof ? (
+            <button type="button" className="btn btn-outline" onClick={() => onPreviewProof(order)}>
+              <span className="material-symbols-outlined">visibility</span>
+              Preview Proof
+            </button>
+          ) : null}
           <button type="button" className="btn btn-muted" onClick={() => onInvoice(order)}>
             <span className="material-symbols-outlined">receipt_long</span>
-            {order.proofAvailable ? 'Download Proof & Invoice' : 'Download Invoice'}
+            {order.proofAvailable ? 'Download Proof' : 'Download Invoice'}
           </button>
           <button type="button" className="btn btn-dark" onClick={() => onReorder(order)}>
             <span className="material-symbols-outlined">refresh</span>

@@ -6,11 +6,13 @@ import type { DeliveryStop } from '../../services/deliveryBackendApi'
 type Props = {
   detail: DeliveryStop
   onBack: () => void
-  onConfirm: (recipient: string, photo: File, signature: Blob) => void
+  onConfirm: (recipient: string, photo: File, signature: Blob) => void | Promise<void>
   onNotify: (message: string) => void
+  /** True while proof upload / Zoho sync is in progress. */
+  submitting?: boolean
 }
 
-export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: Props) {
+export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify, submitting = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawing = useRef(false)
   const hasSignature = useRef(false)
@@ -301,11 +303,11 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
     <div className="dd-pod-screen">
       <header className="dd-header">
         <div className="dd-header-row">
-          <button type="button" className="dd-icon-btn" aria-label="Back" onClick={onBack}>
+          <button type="button" className="dd-icon-btn" aria-label="Back" onClick={onBack} disabled={submitting}>
             <span className="material-symbols-outlined">arrow_back</span>
           </button>
           <h1>Proof of Delivery</h1>
-          <button type="button" className="dd-text-btn" onClick={() => onNotify('Help')}>
+          <button type="button" className="dd-text-btn" onClick={() => onNotify('Help')} disabled={submitting}>
             Help
           </button>
         </div>
@@ -512,8 +514,10 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
       <footer className="dd-footer-fixed">
         <button
           type="button"
-          className="dd-accent-btn"
+          className={`dd-accent-btn${submitting ? ' dd-accent-btn--loading' : ''}`}
+          disabled={submitting}
           onClick={() => {
+            if (submitting) return
             void (async () => {
               if (!recipient.trim() || recipient.trim().length < 2) {
                 onNotify('Please enter recipient name')
@@ -532,14 +536,32 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
                 onNotify('Could not export signature')
                 return
               }
-              onConfirm(recipient.trim(), invoicePhoto, signature)
+              await onConfirm(recipient.trim(), invoicePhoto, signature)
             })()
           }}
         >
-          Confirm Delivery
-          <span className="material-symbols-outlined">check_circle</span>
+          {submitting ? (
+            <>
+              <span className="dd-btn-spin" aria-hidden />
+              Completing order…
+            </>
+          ) : (
+            <>
+              Confirm Delivery
+              <span className="material-symbols-outlined">check_circle</span>
+            </>
+          )}
         </button>
       </footer>
+
+      {submitting ? (
+        <div className="dd-loader-overlay dd-loader-overlay--pod" role="status" aria-live="polite" aria-busy="true">
+          <div className="dd-loader-card">
+            <span className="dd-loader-spin" aria-hidden />
+            <span>Uploading proof &amp; completing order…</span>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

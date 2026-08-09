@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { requireActiveCustomer, requireCustomer } from '../middleware/requireCustomer.js'
-import { listAssignments } from '../services/deliveryAssignmentStore.js'
+import { listAssignmentsMerged, getAssignmentForInvoice } from '../services/deliveryAssignmentStore.js'
 import {
   ensureCustomerContact,
   getInvoiceAttachment,
@@ -272,7 +272,8 @@ customerRoutes.get('/orders', async (req, res, next) => {
     const rows = Array.isArray(data?.invoices) ? data.invoices : []
     const invoices = rows.filter((invoice) => invoiceBelongsToAppCustomer(invoice, email, zohoCustomerId))
     const { invoices: hydratedInvoices } = await hydrateInvoicesWithLineItems(invoices)
-    const assignmentsByInvoice = new Map(listAssignments().map((row) => [String(row.invoiceId), row]))
+    const mergedAssignments = await listAssignmentsMerged()
+    const assignmentsByInvoice = new Map(mergedAssignments.map((row) => [String(row.invoiceId), row]))
     const orders = hydratedInvoices
       .map((invoice) => mapInvoiceToOrder(invoice, assignmentsByInvoice.get(String(invoice.invoice_id))))
       .sort(compareOrderDateDesc)
@@ -340,7 +341,7 @@ async function customerOrderProofContext(invoiceId, customerEmail, customerFullN
     err.statusCode = 404
     throw err
   }
-  const assignment = listAssignments().find((row) => String(row.invoiceId) === invoiceId)
+  const assignment = await getAssignmentForInvoice(invoiceId)
   if (!assignment?.proof) {
     const err = new Error('Proof is not available yet')
     err.statusCode = 404

@@ -335,9 +335,13 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
         <div className="driver-phone-frame">
           <ProofOfDeliveryScreen
             detail={podDetail}
-            onBack={() => setPodStopId(null)}
+            onBack={() => {
+              if (confirming) return
+              setPodStopId(null)
+            }}
+            submitting={confirming}
             onConfirm={async (recipient, photo, signature) => {
-              if (!podDetail.id) return
+              if (!podDetail.id || confirming) return
               setConfirming(true)
               try {
                 await confirmDeliveryStop(podDetail.id, recipient, photo, signature)
@@ -353,7 +357,6 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
             }}
             onNotify={onNotify}
           />
-          {confirming ? <p style={{ textAlign: 'center', marginTop: 12, color: 'var(--dd-muted)' }}>Syncing confirmation...</p> : null}
         </div>
       </div>
     )

@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { Order } from '../types/app'
 import { OrderCard } from '../components/OrderCard'
+import { OrderProofPreviewModal } from '../components/OrderProofPreviewModal'
+import { useToast } from '../contexts/ToastContext'
 
 type Props = {
   orders: Order[]
@@ -25,7 +27,9 @@ export function OrdersScreen({
   onReorder,
   onQuickAddFromOrder,
 }: Props) {
+  const { showToast } = useToast()
   const [tab, setTab] = useState<'active' | 'past'>('active')
+  const [previewOrder, setPreviewOrder] = useState<Order | null>(null)
 
   const visibleOrders = useMemo(() => {
     if (tab === 'active') return orders.filter((order) => order.status !== 'Delivered')
@@ -66,45 +70,50 @@ export function OrdersScreen({
           </div>
         ) : (
           <>
-        <p className="orders-intro">
-          {tab === 'active'
-            ? 'Track ongoing orders and check what to do next.'
-            : 'See completed orders, download invoice, or buy again.'}
-        </p>
-        {visibleOrders.map((order) => (
-          <OrderCard
-            key={order.id}
-            order={order}
-            onTrackOrder={onTrackOrder}
-            onViewDetails={onViewDetails}
-            onInvoice={onInvoice}
-            onReorder={onReorder}
-          />
-        ))}
-
-        {tab === 'past' && visibleOrders.length > 0 ? (
-          <button
-            type="button"
-            className="btn btn-dark block"
-            onClick={() => onQuickAddFromOrder(visibleOrders[0])}
-          >
-            Buy Last Delivered Order Again
-          </button>
-        ) : null}
-
-        {visibleOrders.length === 0 ? (
-          <div className="empty-state">
-            <h3>{tab === 'active' ? 'No active orders right now' : 'No delivered orders yet'}</h3>
-            <p>
+            <p className="orders-intro">
               {tab === 'active'
-                ? 'New orders will appear here and you can track delivery in one tap.'
-                : 'Delivered orders will show up here once completed.'}
+                ? 'Track ongoing orders and check what to do next.'
+                : 'See completed orders, preview delivery proof, download, or buy again.'}
             </p>
-          </div>
-        ) : null}
+            {visibleOrders.map((order) => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                onTrackOrder={onTrackOrder}
+                onViewDetails={onViewDetails}
+                onInvoice={onInvoice}
+                onPreviewProof={(o) => setPreviewOrder(o)}
+                onReorder={onReorder}
+              />
+            ))}
+
+            {tab === 'past' && visibleOrders.length > 0 ? (
+              <button type="button" className="btn btn-dark block" onClick={() => onQuickAddFromOrder(visibleOrders[0])}>
+                Buy Last Delivered Order Again
+              </button>
+            ) : null}
+
+            {visibleOrders.length === 0 ? (
+              <div className="empty-state">
+                <h3>{tab === 'active' ? 'No active orders right now' : 'No delivered orders yet'}</h3>
+                <p>
+                  {tab === 'active'
+                    ? 'New orders will appear here and you can track delivery in one tap.'
+                    : 'Delivered orders will show up here once completed.'}
+                </p>
+              </div>
+            ) : null}
           </>
         )}
       </main>
+
+      {previewOrder ? (
+        <OrderProofPreviewModal
+          order={previewOrder}
+          onClose={() => setPreviewOrder(null)}
+          onNotify={(message, variant) => showToast(message, { variant })}
+        />
+      ) : null}
     </>
   )
 }
