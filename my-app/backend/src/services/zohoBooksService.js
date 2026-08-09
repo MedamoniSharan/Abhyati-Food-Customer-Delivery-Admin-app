@@ -252,7 +252,20 @@ export async function getModuleById(modulePath, id, query = {}) {
   if (isDynamoReadsEnabled()) {
     try {
       const fromDdb = await readEntityFromDynamo(modulePath, id)
-      if (fromDdb) return fromDdb
+      if (fromDdb) {
+        // List-shaped item mirrors omit custom_fields / locations — fall through to Zoho for edit/stock.
+        if (modulePath === '/items') {
+          const entity = fromDdb.item
+          const incomplete =
+            !entity ||
+            typeof entity !== 'object' ||
+            !Array.isArray(entity.custom_fields) ||
+            (String(entity.item_type || '').toLowerCase() === 'inventory' && !Array.isArray(entity.locations))
+          if (!incomplete) return fromDdb
+        } else {
+          return fromDdb
+        }
+      }
     } catch (err) {
       log.warn('Dynamo get failed; falling back to Zoho', { modulePath, id, ...serializeError(err) })
     }
@@ -292,8 +305,9 @@ export async function listContactsDetailBySearchText({ searchText, contactType =
         seen.add(id)
         out.push(row)
       }
-      // Dynamo list returns the full filtered set in page 1 when scanning; no multi-page N+1.
-      if (out.length || data) return out
+      // Only trust Dynamo when we found matches. List-shaped mirrors often omit `notes`
+      // (driver/customer password markers), so an empty result must fall through to Zoho.
+      if (out.length > 0) return out
     } catch (err) {
       log.warn('Dynamo contact search failed; falling back to Zoho walk', serializeError(err))
     }

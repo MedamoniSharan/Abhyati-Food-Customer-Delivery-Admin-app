@@ -91,6 +91,16 @@ export async function hydrateAssignmentFromInvoice(assignment) {
   const invoiceId = String(assignment.invoiceId || '').trim()
   if (!invoiceId) return assignment
 
+  // Skip remote fetch when the assignment already has delivery-critical fields.
+  if (
+    Array.isArray(assignment.items) &&
+    assignment.items.length > 0 &&
+    String(assignment.phone || '').trim() &&
+    String(assignment.address || '').trim()
+  ) {
+    return assignment
+  }
+
   const invoice = await fetchInvoiceForAssignment(invoiceId)
   if (!invoice) return assignment
 
@@ -107,11 +117,11 @@ export async function hydrateAssignmentFromInvoice(assignment) {
     ...assignment,
     address,
     customerName: String(assignment.customerName || invoice.customer_name || contactName).trim(),
-    phone,
+    phone: phone || String(assignment.phone || '').trim(),
     contactLine: contactName ? `Main Contact: ${contactName}` : '',
     driverNote,
     arrivalWindow: String(invoice.date || invoice.invoice_date || assignment.createdAt || 'Today').slice(0, 10),
-    items,
+    items: items.length ? items : assignment.items || [],
     mapsQuery: mapsQuery || address,
     mapsLink: mapsLink || undefined,
     addressLine1,

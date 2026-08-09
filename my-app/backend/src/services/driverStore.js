@@ -6,6 +6,15 @@ import {
 import { findContactByEmail, getModuleById, updateModule } from './zohoBooksService.js'
 import { hashPassword, verifyPassword } from './authStore.js'
 
+let driversListCache = null
+let driversListCacheAt = 0
+const DRIVERS_LIST_TTL_MS = 60_000
+
+export function invalidateDriversListCache() {
+  driversListCache = null
+  driversListCacheAt = 0
+}
+
 function normalizeEmail(email) {
   return email.trim().toLowerCase()
 }
@@ -44,6 +53,7 @@ export async function attachDriverCredentialOnZoho(contactId, password) {
     notes,
     is_active: true
   })
+  invalidateDriversListCache()
 }
 
 export async function createDriverRecord({ email, password, zohoContactId }) {
@@ -67,6 +77,7 @@ export async function createDriverRecord({ email, password, zohoContactId }) {
     throw err
   }
   await attachDriverCredentialOnZoho(zohoContactId, password)
+  invalidateDriversListCache()
   const fresh = (await getModuleById('/contacts', zohoContactId)).contact || contact
   return toPublicDriver(fresh)
 }
@@ -130,6 +141,7 @@ export async function setDriverDisabled(email, disabled) {
     contact_id: contact.contact_id,
     is_active: !disabled
   })
+  invalidateDriversListCache()
   return true
 }
 
@@ -141,6 +153,7 @@ export async function setDriverDisabledByContactId(contactId, disabled) {
   const c = data?.contact || data
   if (!c?.contact_id || parseDriverPasswordHashFromNotes(c.notes) == null) return false
   await updateModule('/contacts', id, { contact_id: id, is_active: !disabled })
+  invalidateDriversListCache()
   return true
 }
 
@@ -158,6 +171,7 @@ export async function deleteDriverRecordByContactId(contactId) {
   const c = data?.contact || data
   if (!c?.contact_id || parseDriverPasswordHashFromNotes(c.notes) == null) return false
   await updateModule('/contacts', id, { contact_id: id, notes: '' })
+  invalidateDriversListCache()
   return true
 }
 
@@ -178,13 +192,10 @@ export async function updateDriverRecord(currentEmail, { fullName, email, passwo
   if (typeof password === 'string' && password) {
     await attachDriverCredentialOnZoho(contact.contact_id, password)
   }
+  invalidateDriversListCache()
   const fresh = (await getModuleById('/contacts', contact.contact_id)).contact || contact
   return toPublicDriver(fresh)
 }
-
-let driversListCache = null
-let driversListCacheAt = 0
-const DRIVERS_LIST_TTL_MS = 60_000
 
 export async function listDrivers() {
   if (driversListCache && Date.now() - driversListCacheAt < DRIVERS_LIST_TTL_MS) {

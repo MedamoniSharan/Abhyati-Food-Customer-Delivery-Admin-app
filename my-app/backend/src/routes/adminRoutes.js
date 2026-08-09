@@ -1463,7 +1463,12 @@ adminRoutes.delete('/drivers/:email', async (req, res, next) => {
 adminRoutes.get('/deliveries', async (req, res, next) => {
   try {
     const query = z.object({}).passthrough().parse(req.query)
-    const data = await listModule('/salesorders', { per_page: 200, ...query })
+    const data = await listModule('/salesorders', {
+      per_page: 200,
+      sort_column: 'date',
+      sort_order: 'D',
+      ...query
+    })
     const orders = Array.isArray(data.salesorders) ? data.salesorders : []
     orders.sort((a, b) => (Date.parse(String(b?.date || '')) || 0) - (Date.parse(String(a?.date || '')) || 0))
     const stops = orders.map((order, index) => mapDeliveryStopFromSalesOrder(order, index))

@@ -28,19 +28,58 @@ export function invalidateScanCache(tableName) {
   scanInflight.clear()
 }
 
+/** True when an in-process full-table scan is warm (or currently loading). */
+export function hasWarmScanCache(tableName) {
+  const hit = scanCache.get(tableName)
+  if (hit && Date.now() - hit.at < SCAN_TTL_MS) return true
+  return scanInflight.has(tableName)
+}
+
+/** True only when scan results are already in memory (do not wait on inflight). */
+export function hasReadyScanCache(tableName) {
+  const hit = scanCache.get(tableName)
+  return Boolean(hit && Date.now() - hit.at < SCAN_TTL_MS)
+}
+
+/** Update one row in the in-memory scan cache so list pages stay fast after a single write. */
+export function upsertScanCacheItem(tableName, item) {
+  if (!item || item.id == null) return
+  const hit = scanCache.get(tableName)
+  if (!hit?.items) return
+  const id = String(item.id)
+  const items = hit.items.slice()
+  const idx = items.findIndex((row) => row && String(row.id) === id)
+  if (idx >= 0) items[idx] = item
+  else items.push(item)
+  scanCache.set(tableName, { at: hit.at, items })
+}
+
+export function removeScanCacheItem(tableName, id) {
+  const hit = scanCache.get(tableName)
+  if (!hit?.items) return
+  const want = String(id)
+  scanCache.set(tableName, {
+    at: hit.at,
+    items: hit.items.filter((row) => !(row && String(row.id) === want))
+  })
+}
+
 export async function putItem(tableName, item) {
   if (!isDynamoWritesEnabled()) return
   const client = getDocClient()
+  const stored = {
+    ...item,
+    updatedAt: item.updatedAt || new Date().toISOString()
+  }
   await client.send(
     new PutCommand({
       TableName: tableName,
-      Item: {
-        ...item,
-        updatedAt: item.updatedAt || new Date().toISOString()
-      }
+      Item: stored
     })
   )
-  invalidateScanCache(tableName)
+  // Prefer patching the warm list cache over a full invalidate (invalidate forced ~15s rescans after product save).
+  if (scanCache.has(tableName)) upsertScanCacheItem(tableName, stored)
+  else invalidateScanCache(tableName)
 }
 
 export async function getItem(tableName, id) {
@@ -63,7 +102,8 @@ export async function deleteItem(tableName, id) {
       Key: { id: String(id) }
     })
   )
-  invalidateScanCache(tableName)
+  if (scanCache.has(tableName)) removeScanCacheItem(tableName, id)
+  else invalidateScanCache(tableName)
 }
 
 export async function queryGsi1(tableName, gsi1pk, { skBeginsWith, limit, exclusiveStartKey } = {}) {

@@ -8,7 +8,7 @@ import {
   listKeyForEntityType,
   zohoEntityKeys
 } from './dynamoKeys.js'
-import { getItem, queryGsi1, queryGsi2, safeDeleteItem, safePutItem, scanAll } from './dynamoRepository.js'
+import { getItem, queryGsi1, queryGsi2, safeDeleteItem, safePutItem, scanAll, hasReadyScanCache } from './dynamoRepository.js'
 
 const log = createLogger('dynamo-mirror')
 
@@ -214,6 +214,18 @@ export async function listEntitiesFromDynamo(modulePath, query = {}) {
     rows = applyGenericFilters(rows, query)
     const { slice, page_context } = paginate(rows, query)
     return { [listKey]: slice, page_context, code: 0 }
+  }
+
+  // Huge tables (10k+ invoices/SOs): never block a request on a cold/inflight full scan.
+  // Fall through to Zoho's paginated list; warm Dynamo in the background.
+  if (
+    (entityType === 'invoice' || entityType === 'salesorder' || entityType === 'customerpayment') &&
+    !hasReadyScanCache(tableName)
+  ) {
+    void scanAll(tableName).catch((err) => {
+      log.warn('Background heavy-table warm failed', { tableName, ...serializeError(err) })
+    })
+    return null
   }
 
   const items = await scanAll(tableName)
