@@ -1,6 +1,11 @@
 import { getModuleById } from './zohoBooksService.js'
 import { hydrateInvoicesWithLineItems } from './orderInvoiceHydrate.js'
-import { normalizeMapsLink, pickMapsLinkFromZohoAddressBlock, resolveMapsQuery, pickMapsLinkFromInvoice } from '../util/customerMapsLink.js'
+import {
+  isGoogleMapsUrl,
+  pickMapsLinkFromZohoAddressBlock,
+  resolveMapsQuery,
+  pickMapsLinkFromInvoice
+} from '../util/customerMapsLink.js'
 
 const invoiceCache = new Map()
 const CACHE_TTL_MS = 60_000
@@ -69,17 +74,45 @@ function mapLineItems(invoice) {
   }))
 }
 
-function pickAddressLines(invoice) {
+async function pickMapsLinkForInvoice(invoice) {
+  const fromInvoice = pickMapsLinkFromInvoice(invoice)
+  if (fromInvoice) return fromInvoice
+  const customerId = String(invoice?.customer_id || '').trim()
+  if (!customerId) return ''
+  try {
+    const data = await getModuleById('/contacts', customerId)
+    const contact = data?.contact || data
+    return (
+      pickMapsLinkFromZohoAddressBlock(contact?.billing_address) ||
+      pickMapsLinkFromZohoAddressBlock(contact?.shipping_address) ||
+      ''
+    )
+  } catch {
+    return ''
+  }
+}
+
+async function pickAddressLines(invoice) {
   const shipping = invoice?.shipping_address || {}
   const billing = invoice?.billing_address || {}
   const cityStateZip = [shipping.city, shipping.state, shipping.zip].filter(Boolean).join(', ')
   const addressLine1 = String(shipping.address || billing.address || '').trim() || 'Address unavailable'
   const addressLine2 = cityStateZip || String(shipping.country || billing.country || '').trim()
-  const mapsLink = pickMapsLinkFromInvoice(invoice)
+  const mapsLink = await pickMapsLinkForInvoice(invoice)
   const addressText = [addressLine1, addressLine2].filter(Boolean).join(', ')
   const mapsQuery = resolveMapsQuery({ mapsLink, addressText })
   const contactName = String(shipping.attention || invoice?.customer_name || 'Customer').trim()
   return { addressLine1, addressLine2, mapsQuery, mapsLink, contactName }
+}
+
+function assignmentNeedsHydrate(assignment) {
+  const hasItems = Array.isArray(assignment.items) && assignment.items.length > 0
+  const hasPhone = Boolean(String(assignment.phone || '').trim())
+  const hasAddress = Boolean(String(assignment.address || '').trim())
+  const hasMaps =
+    Boolean(String(assignment.mapsLink || '').trim()) || isGoogleMapsUrl(assignment.mapsQuery)
+  // Always fetch when maps link is missing — address alone is not enough for Google Maps open.
+  return !(hasItems && hasPhone && hasAddress && hasMaps)
 }
 
 /**
@@ -91,20 +124,14 @@ export async function hydrateAssignmentFromInvoice(assignment) {
   const invoiceId = String(assignment.invoiceId || '').trim()
   if (!invoiceId) return assignment
 
-  // Skip remote fetch when the assignment already has delivery-critical fields.
-  if (
-    Array.isArray(assignment.items) &&
-    assignment.items.length > 0 &&
-    String(assignment.phone || '').trim() &&
-    String(assignment.address || '').trim()
-  ) {
+  if (!assignmentNeedsHydrate(assignment)) {
     return assignment
   }
 
   const invoice = await fetchInvoiceForAssignment(invoiceId)
   if (!invoice) return assignment
 
-  const { addressLine1, addressLine2, mapsQuery, mapsLink, contactName } = pickAddressLines(invoice)
+  const { addressLine1, addressLine2, mapsQuery, mapsLink, contactName } = await pickAddressLines(invoice)
   const phone = pickPhone(invoice)
   const items = mapLineItems(invoice)
   const driverNote = pickDriverNote(invoice)

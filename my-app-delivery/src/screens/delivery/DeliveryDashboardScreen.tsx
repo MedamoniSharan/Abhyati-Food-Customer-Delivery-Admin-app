@@ -119,6 +119,7 @@ export function DeliveryDashboardScreen({
           <div className="dd-map-tile" style={{ aspectRatio: '16 / 11', borderRadius: 0 }}>
             <DeliveryGoogleMap
               destination={currentStop?.mapsQuery || 'India'}
+              mapsLink={currentStop?.mapsLink}
             />
             <div className="dd-map-grad" style={{ pointerEvents: 'none' }} />
             <div className="dd-map-pills" style={{ pointerEvents: 'none' }}>
@@ -140,7 +141,7 @@ export function DeliveryDashboardScreen({
                 </div>
                 {currentStop?.mapsLink ? (
                   <div style={{ marginTop: 10 }}>
-                    <DeliveryMapsLink mapsLink={currentStop.mapsLink} onOpen={onStartNavigation} compact />
+                    <DeliveryMapsLink mapsLink={currentStop.mapsLink} compact />
                   </div>
                 ) : null}
               </div>

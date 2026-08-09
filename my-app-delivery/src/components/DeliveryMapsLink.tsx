@@ -1,5 +1,6 @@
 type Props = {
   mapsLink?: string
+  /** Optional side-effect after opening the customer Maps link (do not replace navigation). */
   onOpen?: () => void
   compact?: boolean
 }
@@ -9,11 +10,9 @@ export function DeliveryMapsLink({ mapsLink, onOpen, compact = false }: Props) {
   if (!link) return null
 
   function openLink() {
-    if (onOpen) {
-      onOpen()
-      return
-    }
+    // Always open the customer's Google Maps URL directly.
     window.open(link, '_blank', 'noopener,noreferrer')
+    onOpen?.()
   }
 
   if (compact) {

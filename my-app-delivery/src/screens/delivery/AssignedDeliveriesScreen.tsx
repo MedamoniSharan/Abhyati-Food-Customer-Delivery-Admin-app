@@ -23,8 +23,8 @@ type Props = {
   onAcceptStop?: (stopId: string) => void | Promise<void>
   acceptingId?: string | null
   onBackToDashboard: () => void
-  /** Optional maps destination; falls back in parent when empty */
-  onViewMap: (mapsQueryHint?: string) => void
+  /** Optional maps destination; falls back in parent when empty. Second arg is customer Maps share URL. */
+  onViewMap: (mapsQueryHint?: string, mapsLink?: string) => void
   onRefresh?: () => void | Promise<void>
 }
 
@@ -200,7 +200,7 @@ export function AssignedDeliveriesScreen({
             className="dd-link"
             onClick={() => {
               const open = visibleStops.find((s) => s.statusTag !== 'Delivered')
-              onViewMap(open?.mapsQuery?.trim() || undefined)
+              onViewMap(open?.mapsQuery?.trim() || undefined, open?.mapsLink?.trim() || undefined)
             }}
           >
             View Map
@@ -333,7 +333,7 @@ export function AssignedDeliveriesScreen({
                           type="button"
                           className="dd-muted-btn"
                           style={{ width: 'auto', padding: '10px 14px' }}
-                          onClick={() => onViewMap(stop.mapsQuery?.trim() || undefined)}
+                          onClick={() => onViewMap(stop.mapsQuery?.trim() || undefined, stop.mapsLink?.trim() || undefined)}
                         >
                           <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
                             map

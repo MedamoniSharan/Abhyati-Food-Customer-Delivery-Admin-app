@@ -1,3 +1,5 @@
+import { isGoogleMapsUrl, normalizeMapsLink } from './mapsLink'
+
 /** Maps Embed API key from Vite env (optional). */
 export function getGoogleMapsApiKey(): string | undefined {
   const k = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
@@ -17,9 +19,17 @@ export function buildDirectionsEmbedSrc(originLatLng: string, destination: strin
   return `https://www.google.com/maps/embed/v1/directions?key=${encodeURIComponent(apiKey)}&mode=driving&origin=${o}&destination=${d}`
 }
 
-/** Opens native Google Maps with optional user origin (lat,lng). No API key. */
+/**
+ * Opens Google Maps. If destination is already a Maps share URL, open it directly
+ * (do not wrap as destination= — that breaks maps.app.goo.gl links).
+ */
 export function buildGoogleMapsDirectionsUrl(destination: string, originLatLng?: string | null): string {
-  const dest = encodeURIComponent(destination.trim())
+  const raw = String(destination || '').trim()
+  const mapsLink = normalizeMapsLink(raw)
+  if (mapsLink) return mapsLink
+  if (isGoogleMapsUrl(raw)) return raw.startsWith('http') ? raw : `https://${raw}`
+
+  const dest = encodeURIComponent(raw)
   if (originLatLng?.trim()) {
     const o = encodeURIComponent(originLatLng.trim())
     return `https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${dest}`

@@ -44,7 +44,7 @@ export function DeliveryDetailScreen({
 
       <main className="dd-main" style={{ paddingBottom: 120 }}>
         <div className="dd-map-tile" style={{ aspectRatio: '16 / 10', marginBottom: 12 }}>
-          <DeliveryGoogleMap destination={detail.mapsQuery} />
+          <DeliveryGoogleMap destination={detail.mapsQuery} mapsLink={detail.mapsLink} />
         </div>
 
         <div className="dd-card" style={{ padding: 20, marginBottom: 12 }}>
@@ -96,7 +96,7 @@ export function DeliveryDetailScreen({
             {detail.mapsLink ? (
               <>
                 <div style={{ height: 1, background: 'var(--dd-border)' }} />
-                <DeliveryMapsLink mapsLink={detail.mapsLink} onOpen={onOpenAddress} />
+                <DeliveryMapsLink mapsLink={detail.mapsLink} />
               </>
             ) : null}
             <div style={{ height: 1, background: 'var(--dd-border)' }} />

@@ -5,8 +5,8 @@ export function isGoogleMapsUrl(value) {
   try {
     const url = new URL(raw.startsWith('http') ? raw : `https://${raw}`)
     const host = url.hostname.replace(/^www\./, '').toLowerCase()
-    if (host === 'maps.app.goo.gl' || host === 'goo.gl') return true
-    if (host.endsWith('google.com') && url.pathname.includes('/maps')) return true
+    if (host === 'maps.app.goo.gl' || host === 'goo.gl' || host === 'maps.google.com') return true
+    if (host.endsWith('google.com') && (url.pathname.includes('/maps') || url.searchParams.has('q'))) return true
     return false
   } catch {
     return false

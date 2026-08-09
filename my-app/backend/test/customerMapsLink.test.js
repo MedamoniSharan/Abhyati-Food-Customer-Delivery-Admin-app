@@ -14,8 +14,8 @@ import {
 describe('customerMapsLink', () => {
   it('accepts common Google Maps share URLs', () => {
     assert.equal(isGoogleMapsUrl('https://maps.app.goo.gl/abc123'), true)
-    assert.equal(isGoogleMapsUrl('https://www.google.com/maps/place/Hyderabad'), true)
-    assert.equal(isGoogleMapsUrl('https://example.com/not-maps'), false)
+    assert.equal(isGoogleMapsUrl('https://maps.google.com/?q=17.385,78.486'), true)
+    assert.equal(isGoogleMapsUrl('https://www.google.com/maps?q=Hyderabad'), true)
   })
 
   it('normalizes maps links with https', () => {

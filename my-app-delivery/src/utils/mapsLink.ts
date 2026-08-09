@@ -1,3 +1,4 @@
+/** Recognize share links customers paste from Google Maps. */
 export function isGoogleMapsUrl(value: string): boolean {
   const raw = String(value || '').trim()
   if (!raw) return false
@@ -14,6 +15,7 @@ export function isGoogleMapsUrl(value: string): boolean {
   }
 }
 
+/** Normalize to https URL or empty when invalid. */
 export function normalizeMapsLink(value: string): string {
   const raw = String(value || '').trim()
   if (!raw) return ''

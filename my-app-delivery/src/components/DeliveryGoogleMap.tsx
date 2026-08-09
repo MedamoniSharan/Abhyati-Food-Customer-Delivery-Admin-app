@@ -5,19 +5,27 @@ import {
   buildPlaceEmbedSrc,
   getGoogleMapsApiKey,
 } from '../utils/googleMapsEmbed'
+import { isGoogleMapsUrl, normalizeMapsLink } from '../utils/mapsLink'
 
 type Props = {
-  /** Full address or place query for the stop / destination. */
+  /** Full address, place query, or Google Maps share URL. */
   destination: string
+  /** Preferred: customer profile Maps share URL. */
+  mapsLink?: string
   /** Shown when no API key or before iframe loads. */
   fallbackImageUrl?: string
   className?: string
 }
 
-export function DeliveryGoogleMap({ destination, fallbackImageUrl, className }: Props) {
+export function DeliveryGoogleMap({ destination, mapsLink, fallbackImageUrl, className }: Props) {
   const apiKey = getGoogleMapsApiKey()
   const [userOrigin, setUserOrigin] = useState<string | null>(null)
   const [locStatus, setLocStatus] = useState<'idle' | 'loading' | 'ok' | 'denied' | 'unsupported'>('idle')
+
+  const shareLink =
+    normalizeMapsLink(mapsLink || '') ||
+    (isGoogleMapsUrl(destination) ? normalizeMapsLink(destination) || destination.trim() : '')
+  const placeQuery = shareLink ? '' : String(destination || '').trim()
 
   const refreshLocation = useCallback(() => {
     if (!navigator.geolocation) {
@@ -41,16 +49,19 @@ export function DeliveryGoogleMap({ destination, fallbackImageUrl, className }: 
     refreshLocation()
   }, [refreshLocation])
 
-  const publicEmbedSrc = destination.trim()
-    ? `https://maps.google.com/maps?q=${encodeURIComponent(destination)}&output=embed`
-    : null
-  const embedSrc = apiKey
-    ? userOrigin
-      ? buildDirectionsEmbedSrc(userOrigin, destination, apiKey)
-      : buildPlaceEmbedSrc(destination, apiKey)
-    : publicEmbedSrc
+  // Short share links (maps.app.goo.gl) cannot be embedded reliably — open externally instead.
+  const publicEmbedSrc =
+    !shareLink && placeQuery
+      ? `https://maps.google.com/maps?q=${encodeURIComponent(placeQuery)}&output=embed`
+      : null
+  const embedSrc =
+    !shareLink && apiKey && placeQuery
+      ? userOrigin
+        ? buildDirectionsEmbedSrc(userOrigin, placeQuery, apiKey)
+        : buildPlaceEmbedSrc(placeQuery, apiKey)
+      : publicEmbedSrc
 
-  const externalUrl = buildGoogleMapsDirectionsUrl(destination, userOrigin)
+  const externalUrl = buildGoogleMapsDirectionsUrl(shareLink || placeQuery || destination, userOrigin)
 
   return (
     <div className={`dd-gmap-wrap ${className ?? ''}`}>
@@ -67,8 +78,12 @@ export function DeliveryGoogleMap({ destination, fallbackImageUrl, className }: 
         <>
           {fallbackImageUrl ? <div className="dd-map-bg" style={{ backgroundImage: `url(${fallbackImageUrl})` }} /> : null}
           <div className="dd-gmap-fallback-panel">
-            <p className="dd-gmap-fallback-title">Maps</p>
-            <p className="dd-gmap-fallback-text">Using public Google Maps embed. Open in Google Maps for turn-by-turn navigation.</p>
+            <p className="dd-gmap-fallback-title">Google Maps</p>
+            <p className="dd-gmap-fallback-text">
+              {shareLink
+                ? 'Customer shared a Google Maps pin. Open it for turn-by-turn navigation.'
+                : 'Open in Google Maps for turn-by-turn navigation.'}
+            </p>
             {locStatus === 'denied' ? (
               <p className="dd-gmap-fallback-hint">Location denied — map shows destination only in Google Maps.</p>
             ) : null}
@@ -82,6 +97,11 @@ export function DeliveryGoogleMap({ destination, fallbackImageUrl, className }: 
         <button type="button" className="dd-icon-btn dd-gmap-tool-btn" aria-label="Use my location" onClick={refreshLocation}>
           <span className="material-symbols-outlined">my_location</span>
         </button>
+        {externalUrl ? (
+          <a className="dd-icon-btn dd-gmap-tool-btn" href={externalUrl} target="_blank" rel="noreferrer" aria-label="Open Google Maps">
+            <span className="material-symbols-outlined">open_in_new</span>
+          </a>
+        ) : null}
       </div>
     </div>
   )

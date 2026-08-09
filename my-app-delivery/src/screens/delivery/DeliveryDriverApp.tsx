@@ -10,6 +10,8 @@ import {
   updateDeliveryStopStatus,
   type DeliveryStop,
 } from '../../services/deliveryBackendApi'
+import { buildGoogleMapsDirectionsUrl } from '../../utils/googleMapsEmbed'
+import { isGoogleMapsUrl, normalizeMapsLink } from '../../utils/mapsLink'
 import { AssignedDeliveriesScreen, type DeliveriesStatusFilter } from './AssignedDeliveriesScreen'
 import { DeliveryBottomNav, type DriverTab } from './DeliveryBottomNav'
 import { DeliveryDashboardScreen } from './DeliveryDashboardScreen'
@@ -100,17 +102,24 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
     setPodStopId(stopId)
   }
 
-  function openRouteMap(mapsQuery?: string) {
+  function openRouteMap(mapsQuery?: string, mapsLink?: string) {
+    const link =
+      normalizeMapsLink(mapsLink || '') ||
+      (isGoogleMapsUrl(mapsQuery || '') ? normalizeMapsLink(mapsQuery || '') || String(mapsQuery || '').trim() : '')
     const query = String(mapsQuery || '').trim() || nextStopMapsQuery()
-    if (!query) {
+    if (!link && !query) {
       onNotify('No route available')
       return
     }
-    setRouteMapQuery(query)
+    // Customer Maps share links open in Google Maps (short links do not embed well).
+    if (link) {
+      openUrl(link)
+    }
+    setRouteMapQuery(link || query)
   }
 
   async function acceptStopAndOpenMap(stopId: string) {
-    const fallbackQuery = stops.find((s) => s.id === stopId)?.mapsQuery
+    const fallback = stops.find((s) => s.id === stopId)
     setAcceptingId(stopId)
     try {
       await acceptDeliveryStop(stopId)
@@ -121,8 +130,8 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
       }
       const refreshed = await refreshStops(true)
       onNotify('Delivery accepted — opening map')
-      const target = refreshed.find((s) => s.id === stopId)
-      openRouteMap(target?.mapsQuery || fallbackQuery)
+      const target = refreshed.find((s) => s.id === stopId) || fallback
+      openRouteMap(target?.mapsQuery || fallback?.mapsQuery, target?.mapsLink || fallback?.mapsLink)
     } catch {
       onNotify('Could not accept delivery')
     } finally {
@@ -143,13 +152,14 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 
-  function openNavigation(destination: string) {
-    if (!destination.trim()) {
+  function openNavigation(destination: string, mapsLink?: string) {
+    const dest = String(destination || '').trim()
+    const link = normalizeMapsLink(mapsLink || '') || (isGoogleMapsUrl(dest) ? normalizeMapsLink(dest) || dest : '')
+    if (!link && !dest) {
       onNotify('No destination available')
       return
     }
-    // Public Google Maps directions URL (no private API key needed)
-    openUrl(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`)
+    openUrl(buildGoogleMapsDirectionsUrl(link || dest))
   }
 
   function callCustomer(phone: string) {
@@ -353,7 +363,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
             onBack={() => setDetailStopId(null)}
             onAccept={() => acceptStopAndOpenMap(detail.id)}
             accepting={acceptingId === detail.id}
-            onViewMap={() => openRouteMap(detail.mapsQuery)}
+            onViewMap={() => openRouteMap(detail.mapsQuery, detail.mapsLink)}
             onOpenProof={() => {
               if (detail.statusTag === 'Delivered' && detail.proofUploaded) {
                 onNotify('Receipt is already saved in Zoho Books')
@@ -365,7 +375,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
               }
               setPodStopId(detail.id)
             }}
-            onOpenAddress={() => openNavigation(detail.mapsQuery)}
+            onOpenAddress={() => openNavigation(detail.mapsQuery, detail.mapsLink)}
             onMessage={() => messageCustomer(detail.phone)}
             onCall={() => callCustomer(detail.phone)}
             onNotify={onNotify}
@@ -396,7 +406,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
                 onNotify('Accept a delivery from the list first')
                 return
               }
-              openRouteMap(stop.mapsQuery)
+              openRouteMap(stop.mapsQuery, stop.mapsLink)
             }}
             onCallCurrent={() => {
               const stop = activeStops.find((s) => s.isNext) ?? activeStops[0]
@@ -434,7 +444,7 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
               setDeliveriesFilter('all')
               setTab('dashboard')
             }}
-            onViewMap={(hint) => openRouteMap(hint)}
+            onViewMap={(hint, mapsLink) => openRouteMap(hint, mapsLink)}
             onRefresh={() => void refreshStops()}
           />
         ) : null}
@@ -539,7 +549,13 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
             </div>
           </header>
           <div className="dd-map-overlay-body">
-            <DeliveryGoogleMap destination={routeMapQuery} />
+            <DeliveryGoogleMap
+              destination={routeMapQuery}
+              mapsLink={
+                activeStops.find((s) => s.mapsQuery?.trim() === routeMapQuery.trim() || s.mapsLink?.trim() === routeMapQuery.trim())
+                  ?.mapsLink
+              }
+            />
           </div>
           {(() => {
             const mapStop = activeStops.find((s) => s.mapsQuery?.trim() === routeMapQuery.trim())
