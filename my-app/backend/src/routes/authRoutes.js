@@ -11,9 +11,9 @@ import {
 import { signCustomerToken, verifyCustomerToken } from '../services/jwtService.js'
 import { getActiveTierForContact, isCustomerPricingConfigured } from '../services/customerPricingZohoService.js'
 import { isGoogleMapsUrl } from '../util/customerMapsLink.js'
+import { isValidIndiaMobile, normalizeIndiaMobile } from '../util/indiaMobile.js'
 import {
   isMsg91Configured,
-  normalizeIndiaMobile,
   resendOtp,
   sendOtp,
   verifyOtp
@@ -59,8 +59,15 @@ const signupSchema = z.object({
 })
 
 const profilePatchSchema = z.object({
-  fullName: z.string().min(1).max(200).optional(),
-  mobile: z.string().max(50).optional(),
+  fullName: z.string().trim().min(2, 'Full name is required').max(200).optional(),
+  mobile: z
+    .string()
+    .trim()
+    .max(50)
+    .optional()
+    .refine((v) => v === undefined || v === '' || isValidIndiaMobile(v), {
+      message: 'Enter a valid 10-digit Indian mobile number'
+    }),
   email: z.string().email().max(254).optional(),
   password: z.string().min(6).max(128).optional(),
   currentPassword: z.string().min(1).max(200).optional(),
@@ -195,7 +202,9 @@ authRoutes.patch('/profile', requireCustomer, requireActiveCustomer, async (req,
 
     const updates = {}
     if (body.fullName !== undefined) updates.fullName = body.fullName
-    if (body.mobile !== undefined) updates.mobile = body.mobile
+    if (body.mobile !== undefined) {
+      updates.mobile = body.mobile.trim() ? normalizeIndiaMobile(body.mobile) || body.mobile.trim() : ''
+    }
     if (body.email !== undefined) updates.email = body.email
     if (body.password) updates.password = body.password
     if (body.deliveryAddress !== undefined) updates.deliveryAddress = body.deliveryAddress

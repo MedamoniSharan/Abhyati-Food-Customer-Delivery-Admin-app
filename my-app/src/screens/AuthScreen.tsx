@@ -3,6 +3,7 @@ import { useToast } from '../contexts/ToastContext'
 import { loginCustomer, resendSignupOtp, sendSignupOtp, signupCustomer } from '../services/authApi'
 import type { AuthUser } from '../services/authApi'
 import { isGoogleMapsUrl } from '../utils/mapsLink'
+import { looksLikeIndiaMobile, normalizeIndiaMobile } from '../utils/indiaMobile'
 
 export type AuthSuccessPayload = {
   message: string
@@ -17,14 +18,6 @@ type Props = {
 type AuthView = 'welcome' | 'login' | 'signup'
 
 const OTP_RESEND_SECONDS = 30
-
-function looksLikeIndiaMobile(value: string): boolean {
-  const digits = value.replace(/\D/g, '')
-  if (digits.length === 10 && /^[6-9]/.test(digits)) return true
-  if (digits.length === 12 && /^91[6-9]\d{9}$/.test(digits)) return true
-  if (digits.length === 11 && /^0[6-9]\d{9}$/.test(digits)) return true
-  return false
-}
 
 function PasswordField({
   value,
@@ -215,7 +208,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
 
     const name = fullName.trim()
     const em = email.trim()
-    const mob = mobile.trim()
+    const mob = normalizeIndiaMobile(mobile.trim()) || mobile.trim()
     const addr = deliveryAddress.trim()
     const maps = mapsLink.trim()
 
@@ -296,7 +289,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
           />
           <input
             className="auth-input"
-            placeholder="Mobile number"
+            placeholder="10-digit Indian mobile"
             type="tel"
             autoComplete="tel"
             inputMode="tel"

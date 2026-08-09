@@ -1,12 +1,12 @@
 import type { AuthUser } from '../services/authApi'
+import { isValidIndiaMobile } from './indiaMobile'
 
 function hasMeaningfulName(name?: string | null): boolean {
   return String(name || '').trim().length >= 2
 }
 
 function hasValidMobile(m?: string | null): boolean {
-  const digits = String(m || '').replace(/\D/g, '')
-  return digits.length >= 8
+  return isValidIndiaMobile(m)
 }
 
 function hasDeliveryAddress(user: AuthUser): boolean {
@@ -17,7 +17,7 @@ function hasDeliveryAddress(user: AuthUser): boolean {
 export function getCheckoutProfileGaps(user: AuthUser): string[] {
   const gaps: string[] = []
   if (!hasMeaningfulName(user.fullName)) gaps.push('your full name')
-  if (!hasValidMobile(user.mobile)) gaps.push('a contact mobile number (at least 8 digits)')
+  if (!hasValidMobile(user.mobile)) gaps.push('a valid 10-digit Indian mobile number')
   if (!hasDeliveryAddress(user)) gaps.push('your delivery address')
   return gaps
 }

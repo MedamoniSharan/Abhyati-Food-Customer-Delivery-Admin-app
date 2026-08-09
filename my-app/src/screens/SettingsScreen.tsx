@@ -3,6 +3,7 @@ import type { AuthUser } from '../services/authApi'
 import { fetchAuthMe, patchCustomerProfile } from '../services/authApi'
 import { readAuthToken } from '../utils/authSession'
 import { isGoogleMapsUrl } from '../utils/mapsLink'
+import { looksLikeIndiaMobile, normalizeIndiaMobile } from '../utils/indiaMobile'
 
 type Props = {
   user: AuthUser | null
@@ -65,6 +66,18 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
       onNotify('New password must be at least 6 characters.', 'warning')
       return
     }
+    if (fullName.trim().length < 2) {
+      onNotify('Enter your full name.', 'warning')
+      return
+    }
+    if (!looksLikeIndiaMobile(mobile.trim())) {
+      onNotify('Enter a valid 10-digit Indian mobile number.', 'warning')
+      return
+    }
+    if (deliveryAddress.trim().length > 0 && deliveryAddress.trim().length < 5) {
+      onNotify('Delivery address looks too short.', 'warning')
+      return
+    }
     const mapsTrim = mapsLink.trim()
     if (mapsTrim && !isGoogleMapsUrl(mapsTrim)) {
       onNotify('Enter a valid Google Maps link (maps.app.goo.gl or google.com/maps/...).', 'warning')
@@ -84,7 +97,7 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
       } = {
         fullName: fullName.trim(),
         email: email.trim(),
-        mobile: mobile.trim(),
+        mobile: normalizeIndiaMobile(mobile.trim()) || mobile.trim(),
         deliveryAddress: deliveryAddress.trim(),
         mapsLink: mapsTrim
       }
@@ -157,10 +170,16 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
               id="cust-mobile"
               className="auth-input"
               type="tel"
+              inputMode="numeric"
               value={mobile}
               onChange={(e) => setMobile(e.target.value)}
               autoComplete="tel"
+              placeholder="10-digit Indian mobile"
+              maxLength={14}
             />
+            <p className="muted-pad" style={{ marginTop: -4, marginBottom: 12 }}>
+              Required for delivery. Drivers use this number to call you.
+            </p>
 
             <label className="settings-label" htmlFor="cust-address">
               Delivery address

@@ -6,6 +6,7 @@ import {
   resolveMapsQuery,
   pickMapsLinkFromInvoice
 } from '../util/customerMapsLink.js'
+import { formatIndiaMobileDisplay, normalizeIndiaMobile } from '../util/indiaMobile.js'
 
 const invoiceCache = new Map()
 const CACHE_TTL_MS = 60_000
@@ -46,11 +47,39 @@ export async function fetchInvoiceForAssignment(invoiceId) {
   }
 }
 
-function pickPhone(invoice) {
+function pickPhoneFromContact(contact) {
+  if (!contact || typeof contact !== 'object') return ''
+  const root =
+    String(contact.mobile ?? '').trim() ||
+    String(contact.phone ?? '').trim() ||
+    String(contact.work_phone ?? '').trim()
+  if (root) return root
+  const persons = Array.isArray(contact.contact_persons) ? contact.contact_persons : []
+  const primary = persons.find((p) => p?.is_primary_contact === true) || persons[0]
+  return String(primary?.mobile ?? primary?.phone ?? '').trim()
+}
+
+function pickPhone(invoice, contact = null) {
   const shipping = invoice?.shipping_address || {}
   const billing = invoice?.billing_address || {}
-  const phone = shipping.phone || billing.phone || invoice?.contact?.phone || ''
-  return String(phone || '').trim()
+  const raw =
+    String(shipping.phone || billing.phone || invoice?.contact?.phone || '').trim() ||
+    pickPhoneFromContact(contact) ||
+    pickPhoneFromContact(invoice?.contact)
+  const normalized = normalizeIndiaMobile(raw)
+  if (normalized) return formatIndiaMobileDisplay(normalized)
+  return raw
+}
+
+async function loadCustomerContact(invoice) {
+  const customerId = String(invoice?.customer_id || '').trim()
+  if (!customerId) return null
+  try {
+    const data = await getModuleById('/contacts', customerId)
+    return data?.contact || data || null
+  } catch {
+    return null
+  }
 }
 
 function pickDriverNote(invoice) {
@@ -74,31 +103,25 @@ function mapLineItems(invoice) {
   }))
 }
 
-async function pickMapsLinkForInvoice(invoice) {
+async function pickMapsLinkForInvoice(invoice, contact = null) {
   const fromInvoice = pickMapsLinkFromInvoice(invoice)
   if (fromInvoice) return fromInvoice
-  const customerId = String(invoice?.customer_id || '').trim()
-  if (!customerId) return ''
-  try {
-    const data = await getModuleById('/contacts', customerId)
-    const contact = data?.contact || data
-    return (
-      pickMapsLinkFromZohoAddressBlock(contact?.billing_address) ||
-      pickMapsLinkFromZohoAddressBlock(contact?.shipping_address) ||
-      ''
-    )
-  } catch {
-    return ''
-  }
+  const c = contact || (await loadCustomerContact(invoice))
+  if (!c) return ''
+  return (
+    pickMapsLinkFromZohoAddressBlock(c?.billing_address) ||
+    pickMapsLinkFromZohoAddressBlock(c?.shipping_address) ||
+    ''
+  )
 }
 
-async function pickAddressLines(invoice) {
+async function pickAddressLines(invoice, contact = null) {
   const shipping = invoice?.shipping_address || {}
   const billing = invoice?.billing_address || {}
   const cityStateZip = [shipping.city, shipping.state, shipping.zip].filter(Boolean).join(', ')
   const addressLine1 = String(shipping.address || billing.address || '').trim() || 'Address unavailable'
   const addressLine2 = cityStateZip || String(shipping.country || billing.country || '').trim()
-  const mapsLink = await pickMapsLinkForInvoice(invoice)
+  const mapsLink = await pickMapsLinkForInvoice(invoice, contact)
   const addressText = [addressLine1, addressLine2].filter(Boolean).join(', ')
   const mapsQuery = resolveMapsQuery({ mapsLink, addressText })
   const contactName = String(shipping.attention || invoice?.customer_name || 'Customer').trim()
@@ -131,8 +154,9 @@ export async function hydrateAssignmentFromInvoice(assignment) {
   const invoice = await fetchInvoiceForAssignment(invoiceId)
   if (!invoice) return assignment
 
-  const { addressLine1, addressLine2, mapsQuery, mapsLink, contactName } = await pickAddressLines(invoice)
-  const phone = pickPhone(invoice)
+  const contact = await loadCustomerContact(invoice)
+  const { addressLine1, addressLine2, mapsQuery, mapsLink, contactName } = await pickAddressLines(invoice, contact)
+  const phone = pickPhone(invoice, contact)
   const items = mapLineItems(invoice)
   const driverNote = pickDriverNote(invoice)
   const address =

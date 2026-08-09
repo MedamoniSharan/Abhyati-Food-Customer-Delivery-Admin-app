@@ -12,6 +12,7 @@ import {
 } from '../../services/deliveryBackendApi'
 import { buildGoogleMapsDirectionsUrl } from '../../utils/googleMapsEmbed'
 import { isGoogleMapsUrl, normalizeMapsLink } from '../../utils/mapsLink'
+import { formatIndiaMobileTel, isValidIndiaMobile } from '../../utils/indiaMobile'
 import { AssignedDeliveriesScreen, type DeliveriesStatusFilter } from './AssignedDeliveriesScreen'
 import { DeliveryBottomNav, type DriverTab } from './DeliveryBottomNav'
 import { DeliveryDashboardScreen } from './DeliveryDashboardScreen'
@@ -144,10 +145,6 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
     return stop?.mapsQuery || ''
   }
 
-  function safePhoneNumber(phone: string) {
-    return phone.replace(/[^\d+]/g, '')
-  }
-
   function openUrl(url: string) {
     window.open(url, '_blank', 'noopener,noreferrer')
   }
@@ -163,7 +160,11 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
   }
 
   function callCustomer(phone: string) {
-    const normalized = safePhoneNumber(phone)
+    if (!isValidIndiaMobile(phone) && !String(phone || '').replace(/\D/g, '').length) {
+      onNotify('Customer phone number not available')
+      return
+    }
+    const normalized = formatIndiaMobileTel(phone)
     if (!normalized) {
       onNotify('Phone number not available')
       return
@@ -172,7 +173,11 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
   }
 
   function messageCustomer(phone: string) {
-    const normalized = safePhoneNumber(phone)
+    if (!isValidIndiaMobile(phone) && !String(phone || '').replace(/\D/g, '').length) {
+      onNotify('Customer phone number not available')
+      return
+    }
+    const normalized = formatIndiaMobileTel(phone)
     if (!normalized) {
       onNotify('Phone number not available')
       return

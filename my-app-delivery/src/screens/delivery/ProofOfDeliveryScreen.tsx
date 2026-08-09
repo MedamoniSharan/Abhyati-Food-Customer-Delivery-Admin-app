@@ -3,9 +3,6 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { Capacitor } from '@capacitor/core'
 import type { DeliveryStop } from '../../services/deliveryBackendApi'
 
-const INVOICE_PREVIEW =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuADpsWe2NwiVMZ6KQnnuJWJyuiLobbzq5rZE2q8PaJW3ma0QUcVSCp7bBSgB4lTZuBdqcOteTtfn7yS5qNU-Ji-NytoSiEcQJQ_BFPzLlru269Old1Yl1GyTcBZD7Q_5Im0If84rjpvqaEX_uZuFMaU7MSghRtKcKGowa7o5T7B3-SAaZsuqd2aKRh24o76KOM1zVPKa0wAsFugUS0_qSBEsQA7sZdk6CldX7v9dJsWy4iOal0jNLo5UCMIr1Ls0weBvc_5CKEEq794'
-
 type Props = {
   detail: DeliveryStop
   onBack: () => void
@@ -22,6 +19,13 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
   const [invoicePhoto, setInvoicePhoto] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const photoInputRef = useRef<HTMLInputElement>(null)
+  const galleryInputRef = useRef<HTMLInputElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const [cameraReady, setCameraReady] = useState(false)
+  const [cameraError, setCameraError] = useState<string | null>(null)
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
+  const isNative = Capacitor.isNativePlatform()
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -61,20 +65,61 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
     return () => URL.revokeObjectURL(url)
   }, [invoicePhoto])
 
-  useEffect(() => {
-    if (!invoicePhoto) return
-    if (Capacitor.isNativePlatform()) return
-    async function requestCameraPermission() {
-      if (!navigator.mediaDevices?.getUserMedia) return
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true })
-        stream.getTracks().forEach((track) => track.stop())
-      } catch {
-        onNotify('Camera permission is required for invoice capture')
+  const onNotifyRef = useRef(onNotify)
+  onNotifyRef.current = onNotify
+
+  const stopLiveCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    if (videoRef.current) videoRef.current.srcObject = null
+    setCameraReady(false)
+  }, [])
+
+  const startLiveCamera = useCallback(
+    async (facing: 'environment' | 'user' = 'environment') => {
+      if (isNative) return
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError('Camera is not supported in this browser')
+        return
       }
+      setCameraError(null)
+      stopLiveCamera()
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: facing },
+            width: { ideal: 1280 },
+            height: { ideal: 960 },
+          },
+        })
+        streamRef.current = stream
+        const video = videoRef.current
+        if (video) {
+          video.srcObject = stream
+          video.muted = true
+          video.setAttribute('playsinline', 'true')
+          await video.play()
+        }
+        setCameraReady(true)
+      } catch {
+        setCameraReady(false)
+        setCameraError('Allow camera access to capture the invoice photo')
+        onNotifyRef.current('Camera permission is required for invoice capture')
+      }
+    },
+    [isNative, stopLiveCamera]
+  )
+
+  // Live camera while waiting for a photo (web / PWA).
+  useEffect(() => {
+    if (invoicePhoto || isNative) {
+      stopLiveCamera()
+      return
     }
-    requestCameraPermission()
-  }, [invoicePhoto, onNotify])
+    void startLiveCamera(facingMode)
+    return () => stopLiveCamera()
+  }, [invoicePhoto, isNative, facingMode, startLiveCamera, stopLiveCamera])
 
   async function uriToFile(uri: string, fileName: string): Promise<File> {
     const response = await fetch(uri)
@@ -82,7 +127,7 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
     return new File([blob], fileName, { type: blob.type || 'image/jpeg' })
   }
 
-  async function captureFromCamera() {
+  async function captureFromNativeCamera() {
     try {
       const photo = await Camera.getPhoto({
         source: CameraSource.Camera,
@@ -104,7 +149,7 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
     }
   }
 
-  async function pickFromGallery() {
+  async function pickFromNativeGallery() {
     try {
       const photo = await Camera.getPhoto({
         source: CameraSource.Photos,
@@ -124,30 +169,72 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
     }
   }
 
-  function openPhotoPicker() {
-    if (Capacitor.isNativePlatform()) {
-      void captureFromCamera()
+  async function captureFromLiveVideo() {
+    const video = videoRef.current
+    if (!video || !cameraReady || video.videoWidth < 2) {
+      onNotify('Camera is not ready yet')
       return
     }
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      onNotify('Could not capture photo')
+      return
+    }
+    ctx.drawImage(video, 0, 0)
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9))
+    if (!blob) {
+      onNotify('Could not capture photo')
+      return
+    }
+    stopLiveCamera()
+    setInvoicePhoto(new File([blob], `invoice-${Date.now()}.jpg`, { type: 'image/jpeg' }))
+  }
+
+  function openShutter() {
+    if (isNative) {
+      void captureFromNativeCamera()
+      return
+    }
+    if (cameraReady) {
+      void captureFromLiveVideo()
+      return
+    }
+    // Fallback: system camera / file picker
     photoInputRef.current?.click()
   }
 
-  function openGalleryPicker() {
-    if (Capacitor.isNativePlatform()) {
-      void pickFromGallery()
+  function openGallery() {
+    if (isNative) {
+      void pickFromNativeGallery()
       return
     }
-    photoInputRef.current?.click()
+    galleryInputRef.current?.click()
+  }
+
+  function switchCamera() {
+    if (isNative) {
+      void captureFromNativeCamera()
+      return
+    }
+    setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
   }
 
   function handlePhotoChange(file: File | undefined) {
     if (!file) return
+    if (!file.type.startsWith('image/')) {
+      onNotify('Please choose an image file')
+      return
+    }
     setInvoicePhoto(file)
   }
 
   function retakePhoto() {
     setInvoicePhoto(null)
     if (photoInputRef.current) photoInputRef.current.value = ''
+    if (galleryInputRef.current) galleryInputRef.current.value = ''
   }
 
   function getPoint(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -265,9 +352,16 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
             className="dd-pod-file-input"
             onChange={(e) => handlePhotoChange(e.target.files?.[0])}
           />
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            className="dd-pod-file-input"
+            onChange={(e) => handlePhotoChange(e.target.files?.[0])}
+          />
           {previewUrl ? (
             <div className="dd-pod-camera dd-pod-camera--preview">
-              <img src={previewUrl} alt="Signed invoice preview" className="dd-pod-preview-img" />
+              <img key={previewUrl} src={previewUrl} alt="Signed invoice preview" className="dd-pod-preview-img" />
               <div className="dd-pod-preview-bar">
                 <p className="dd-pod-preview-label">Invoice photo captured</p>
                 <button type="button" className="dd-pod-retake-btn" onClick={retakePhoto}>
@@ -278,43 +372,45 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
             </div>
           ) : (
             <div className="dd-pod-camera">
-              <img src={INVOICE_PREVIEW} alt="" className="dd-pod-camera-placeholder" />
+              {!isNative ? (
+                <video ref={videoRef} className="dd-pod-live-video" playsInline muted autoPlay />
+              ) : (
+                <div className="dd-pod-camera-idle">
+                  <span className="material-symbols-outlined">photo_camera</span>
+                  <p>Tap the shutter to open the camera</p>
+                </div>
+              )}
+              {!isNative && !cameraReady ? (
+                <div className="dd-pod-camera-idle">
+                  <span className="material-symbols-outlined">photo_camera</span>
+                  <p>{cameraError || 'Starting camera…'}</p>
+                  {cameraError ? (
+                    <button type="button" className="dd-pod-retake-btn" onClick={() => void startLiveCamera(facingMode)}>
+                      Try again
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="dd-pod-frame" />
               <div className="dd-pod-capture-ui">
                 <div className="dd-pod-capture-top">
-                  <button
-                    type="button"
-                    className="dd-icon-btn dd-pod-overlay-btn"
-                    aria-label="Flash"
-                    onClick={() => onNotify('Flash not available in browser preview')}
-                  >
-                    <span className="material-symbols-outlined">flash_on</span>
-                  </button>
+                  <span className="dd-pod-live-badge">{cameraReady || isNative ? 'CAMERA' : '…'}</span>
                 </div>
                 <div className="dd-pod-capture-controls">
-                  <button type="button" className="dd-icon-btn dd-pod-overlay-btn" aria-label="Choose from gallery" onClick={openGalleryPicker}>
+                  <button type="button" className="dd-icon-btn dd-pod-overlay-btn" aria-label="Choose from gallery" onClick={openGallery}>
                     <span className="material-symbols-outlined">image</span>
                   </button>
-                  <button type="button" className="dd-pod-shutter" aria-label="Take photo" onClick={openPhotoPicker}>
+                  <button type="button" className="dd-pod-shutter" aria-label="Take photo" onClick={openShutter}>
                     <span className="dd-pod-shutter-inner" />
                   </button>
-                  <button
-                    type="button"
-                    className="dd-icon-btn dd-pod-overlay-btn"
-                    aria-label="Switch camera"
-                    onClick={() => {
-                      if (Capacitor.isNativePlatform()) {
-                        void captureFromCamera()
-                      } else {
-                        onNotify('Use your device camera when taking the photo')
-                      }
-                    }}
-                  >
+                  <button type="button" className="dd-icon-btn dd-pod-overlay-btn" aria-label="Switch camera" onClick={switchCamera}>
                     <span className="material-symbols-outlined">cameraswitch</span>
                   </button>
                 </div>
               </div>
-              <p className="dd-pod-hint">Capture or select signed invoice photo</p>
+              <p className="dd-pod-hint">
+                {isNative ? 'Tap shutter to open camera' : cameraReady ? 'Tap shutter to capture' : 'Allow camera access to continue'}
+              </p>
             </div>
           )}
         </section>
@@ -370,7 +466,13 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
             </button>
           </div>
           <div className="dd-signature-grid">
-            <canvas ref={canvasRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp} />
+            <canvas
+              ref={canvasRef}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerLeave={handlePointerUp}
+            />
             <p
               style={{
                 position: 'absolute',
@@ -387,7 +489,18 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
             >
               Sign here
             </p>
-            <div style={{ position: 'absolute', bottom: 10, right: 10, background: '#000', color: '#fff', borderRadius: 999, padding: 8, pointerEvents: 'none' }}>
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 10,
+                right: 10,
+                background: '#000',
+                color: '#fff',
+                borderRadius: 999,
+                padding: 8,
+                pointerEvents: 'none',
+              }}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
                 edit
               </span>
@@ -402,7 +515,7 @@ export function ProofOfDeliveryScreen({ detail, onBack, onConfirm, onNotify }: P
           className="dd-accent-btn"
           onClick={() => {
             void (async () => {
-              if (!recipient.trim()) {
+              if (!recipient.trim() || recipient.trim().length < 2) {
                 onNotify('Please enter recipient name')
                 return
               }

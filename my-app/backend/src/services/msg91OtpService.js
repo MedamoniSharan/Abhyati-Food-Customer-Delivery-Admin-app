@@ -1,5 +1,8 @@
 import { env } from '../config/env.js'
 import { createLogger } from '../util/logger.js'
+import { normalizeIndiaMobile } from '../util/indiaMobile.js'
+
+export { normalizeIndiaMobile } from '../util/indiaMobile.js'
 
 const log = createLogger('msg91-otp')
 
@@ -9,16 +12,8 @@ const MSG91_BASE = 'https://control.msg91.com/api/v5'
  * Normalize to India E.164 without plus: 91 + 10 digits.
  * Accepts 10-digit local, 91XXXXXXXXXX, or +91...
  */
-export function normalizeIndiaMobile(input) {
-  const digits = String(input || '').replace(/\D/g, '')
-  if (!digits) return ''
-  if (digits.length === 10 && /^[6-9]/.test(digits)) return `91${digits}`
-  if (digits.length === 12 && digits.startsWith('91') && /^91[6-9]/.test(digits)) return digits
-  if (digits.length === 11 && digits.startsWith('0') && /^0[6-9]\d{9}$/.test(digits)) {
-    return `91${digits.slice(1)}`
-  }
-  return ''
-}
+// normalizeIndiaMobile imported from util/indiaMobile.js
+
 
 export function isMsg91Configured() {
   return Boolean(env.MSG91_AUTH_KEY?.trim() && env.MSG91_TEMPLATE_ID?.trim())

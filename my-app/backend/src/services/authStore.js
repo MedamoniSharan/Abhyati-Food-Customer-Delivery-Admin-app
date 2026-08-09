@@ -18,6 +18,7 @@ import {
   updateModule
 } from './zohoBooksService.js'
 import { normalizeMapsLink, pickMapsLinkFromZohoAddressBlock, isGoogleMapsUrl } from '../util/customerMapsLink.js'
+import { formatIndiaMobileDisplay, normalizeIndiaMobile } from '../util/indiaMobile.js'
 
 const log = createLogger('auth')
 
@@ -85,7 +86,9 @@ function pickMapsLinkFromContact(contact) {
 
 function toPublicUserFromContact(contact) {
   const id = String(contact?.contact_id ?? '')
-  const mobile = pickMobileFromContact(contact)
+  const mobileRaw = pickMobileFromContact(contact)
+  const mobileNorm = normalizeIndiaMobile(mobileRaw)
+  const mobile = mobileNorm ? formatIndiaMobileDisplay(mobileNorm) : mobileRaw
   const deliveryAddress = formatDeliveryAddressFromContact(contact)
   const mapsLink = pickMapsLinkFromContact(contact)
   return {
@@ -186,7 +189,7 @@ export async function signupCustomerUser({ fullName, email, password, mobile, de
     }
   }
 
-  const mob = String(mobile ?? '').trim()
+  const mob = normalizeIndiaMobile(mobile) || String(mobile ?? '').trim()
   if (!mob || mob.length < 8) {
     const err = new Error('Mobile number is required')
     err.statusCode = 400
@@ -356,7 +359,8 @@ export async function updateCustomerUserByEmail(email, updates) {
     ...(updates.email ? { email: nextEmail } : {}),
     ...(updates.mobile !== undefined
       ? (() => {
-          const m = String(updates.mobile ?? '').trim()
+          const raw = String(updates.mobile ?? '').trim()
+          const m = normalizeIndiaMobile(raw) || raw
           const nextPersons = contactPersonsWithPrimaryPhone(current, m)
           return {
             mobile: m,

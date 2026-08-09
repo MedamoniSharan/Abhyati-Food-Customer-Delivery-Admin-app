@@ -40,14 +40,25 @@ export function buildZohoDeliveryAddressBlock(contact) {
   const source = String(bill.address || '').trim() ? bill : ship
   const address = String(source.address || bill.address || ship.address || '').trim()
   const mapsLink = pickMapsLinkFromZohoAddressBlock(bill) || pickMapsLinkFromZohoAddressBlock(ship)
+  const phone =
+    String(contact.mobile || contact.phone || bill.phone || ship.phone || '').trim() ||
+    String(
+      (Array.isArray(contact.contact_persons) &&
+        (contact.contact_persons.find((p) => p?.is_primary_contact)?.phone ||
+          contact.contact_persons[0]?.phone ||
+          contact.contact_persons.find((p) => p?.is_primary_contact)?.mobile ||
+          contact.contact_persons[0]?.mobile)) ||
+        ''
+    ).trim()
   const block = {}
   if (address) block.address = address
   if (mapsLink) block.street2 = mapsLink
+  if (phone) block.phone = phone
   for (const key of ['city', 'state', 'zip', 'country']) {
     const val = String(source[key] || bill[key] || ship[key] || '').trim()
     if (val) block[key] = val
   }
-  if (!block.address && !block.street2) return null
+  if (!block.address && !block.street2 && !block.phone) return null
   return block
 }
 
@@ -80,10 +91,13 @@ export function buildZohoInvoiceCheckoutAddress(deliveryAddressBlock) {
   }
   const mapsLink = normalizeMapsLink(deliveryAddressBlock.street2)
   const address = String(deliveryAddressBlock.address || '').trim().slice(0, 100)
-  if (!address) {
+  const phone = String(deliveryAddressBlock.phone || '').trim().slice(0, 50)
+  if (!address && !phone) {
     return { billing_address: null, mapsLink, mapsNote: formatInvoiceMapsNote(mapsLink) }
   }
-  const billing_address = { address }
+  const billing_address = {}
+  if (address) billing_address.address = address
+  if (phone) billing_address.phone = phone
   for (const key of ['city', 'state', 'zip', 'country']) {
     const val = String(deliveryAddressBlock[key] || '').trim()
     if (val) billing_address[key] = val.slice(0, 50)

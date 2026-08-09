@@ -106,7 +106,9 @@ export function DeliveryDetailScreen({
                   call
                 </span>
                 <div>
-                  <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 600 }}>{detail.phone}</p>
+                  <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 600 }}>
+                    {detail.phone?.trim() || 'Phone not available'}
+                  </p>
                   <p style={{ margin: '4px 0 0', fontSize: '0.875rem', color: 'var(--dd-muted)' }}>{detail.contactLine}</p>
                 </div>
               </div>
