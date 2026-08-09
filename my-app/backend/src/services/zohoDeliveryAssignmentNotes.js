@@ -83,6 +83,8 @@ export async function listAssignmentsFromZohoForDriver(driverEmail, opts = {}) {
   const key = normalizeEmail(driverEmail)
   if (!key) return []
   const maxDetail = Number(opts.maxDetail) > 0 ? Number(opts.maxDetail) : 40
+  /** List payloads often omit `notes`; budget a few detail GETs so assignments are not invisible. */
+  let detailBudget = Number(opts.detailBudget) >= 0 ? Number(opts.detailBudget) : Math.min(12, maxDetail)
   try {
     const data = await listModule('/invoices', {
       per_page: Math.min(maxDetail, 200),
@@ -94,10 +96,20 @@ export async function listAssignmentsFromZohoForDriver(driverEmail, opts = {}) {
     for (const inv of invoices) {
       const invoiceId = String(inv.invoice_id || '').trim()
       if (!invoiceId) continue
-      // Prefer list payload (Dynamo scan cache). Avoid per-invoice Zoho detail GETs on the hot path.
-      const marker = parseAssignmentFromNotes(inv.notes)
+      let full = inv
+      let marker = parseAssignmentFromNotes(inv.notes)
+      if (!marker && detailBudget > 0) {
+        detailBudget -= 1
+        try {
+          const detailData = await getModuleById('/invoices', invoiceId)
+          full = detailData?.invoice || detailData || inv
+          marker = parseAssignmentFromNotes(full?.notes)
+        } catch {
+          /* keep list shape */
+        }
+      }
       if (!marker || normalizeEmail(marker.driverEmail) !== key) continue
-      const row = zohoInvoiceToAssignmentRow(inv, marker)
+      const row = zohoInvoiceToAssignmentRow(full, marker)
       if (row) rows.push(row)
     }
     return rows

@@ -115,16 +115,27 @@ export async function sendOtp(mobile) {
     throw msg91Error('Enter a valid 10-digit Indian mobile number')
   }
 
-  await msg91Request('/otp', {
+  const data = await msg91Request('/otp', {
     method: 'POST',
     query: {
       template_id: env.MSG91_TEMPLATE_ID.trim(),
       mobile: normalized,
-      otp_length: env.MSG91_OTP_LENGTH || 6
+      otp_length: env.MSG91_OTP_LENGTH || 6,
+      // Ask MSG91 for immediate delivery hint when available (still often "success" only).
+      realTimeResponse: 1
     }
   })
 
-  return { mobile: normalized }
+  const requestId = data?.request_id || data?.requestId || null
+  log.info('MSG91 OTP accepted (queued, not proof of SMS delivery)', {
+    mobile: `${normalized.slice(0, 4)}****${normalized.slice(-2)}`,
+    requestId,
+    templateId: `${env.MSG91_TEMPLATE_ID.trim().slice(0, 6)}…`,
+    msg91Type: data?.type,
+    msg91Message: data?.message
+  })
+
+  return { mobile: normalized, requestId }
 }
 
 /**

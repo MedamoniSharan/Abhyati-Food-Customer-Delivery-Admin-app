@@ -16,6 +16,16 @@ function mirrorAssignment(row) {
   void putAssignment(row).catch((err) => log.error('Dynamo assignment mirror failed', serializeError(err)))
 }
 
+/** Await Dynamo write so driver GSI is ready before admin response returns. */
+export async function mirrorAssignmentNow(row) {
+  if (!row?.id) return
+  try {
+    await putAssignment(row)
+  } catch (err) {
+    log.error('Dynamo assignment mirror failed', serializeError(err))
+  }
+}
+
 /** Re-read persisted rows so other API processes (or restarts) see assignments created elsewhere. */
 function reloadAssignmentsFromDisk() {
   assignments.clear()
@@ -60,37 +70,63 @@ export function listAssignmentsForDriver(driverEmail) {
   return [...assignments.values()].filter((a) => String(a.driverEmail).toLowerCase() === key)
 }
 
-export function upsertAssignmentRow(row) {
+export function upsertAssignmentRow(row, { allowReplace = false } = {}) {
   reloadAssignmentsFromDisk()
   const id = String(row?.id || '').trim()
   const invoiceId = String(row?.invoiceId || '').trim()
   const driverEmail = String(row?.driverEmail || '').trim().toLowerCase()
   if (!id || !invoiceId || !driverEmail) return null
-  const existingById = assignments.get(id)
-  if (existingById) return existingById
-  const existingByInvoice = [...assignments.values()].find((a) => String(a.invoiceId) === invoiceId)
-  if (existingByInvoice) return existingByInvoice
-  const next = {
-    ...row,
-    id,
-    driverEmail,
-    invoiceId,
-    driverName: String(row.driverName || 'Driver'),
-    invoiceNumber: String(row.invoiceNumber || invoiceId),
-    customerName: String(row.customerName || 'Customer'),
-    customerEmail: String(row.customerEmail || '').trim().toLowerCase(),
-    amount: Number(row.amount) || 0,
-    address: String(row.address || ''),
-    status: String(row.status || 'assigned'),
-    acceptedAt: row.acceptedAt ?? null,
-    deliveredAt: row.deliveredAt ?? null,
-    proof: row.proof ?? null,
-    createdAt: String(row.createdAt || new Date().toISOString()),
-    updatedAt: String(row.updatedAt || row.createdAt || new Date().toISOString())
+
+  const patchFrom = (base) => {
+    const next = {
+      ...base,
+      ...row,
+      id: String(base.id || id),
+      driverEmail,
+      invoiceId,
+      driverName: String(row.driverName || base.driverName || 'Driver'),
+      invoiceNumber: String(row.invoiceNumber || base.invoiceNumber || invoiceId),
+      customerName: String(row.customerName || base.customerName || 'Customer'),
+      customerEmail: String(row.customerEmail || base.customerEmail || '')
+        .trim()
+        .toLowerCase(),
+      amount: Number(row.amount ?? base.amount) || 0,
+      address: String(row.address || base.address || ''),
+      status: String(row.status || base.status || 'assigned'),
+      acceptedAt: row.acceptedAt !== undefined ? row.acceptedAt : base.acceptedAt ?? null,
+      deliveredAt: row.deliveredAt !== undefined ? row.deliveredAt : base.deliveredAt ?? null,
+      proof: row.proof !== undefined ? row.proof : base.proof ?? null,
+      createdAt: String(base.createdAt || row.createdAt || new Date().toISOString()),
+      updatedAt: String(row.updatedAt || new Date().toISOString())
+    }
+    // Drop other local rows for the same invoice (old driver after reassignment).
+    for (const [k, a] of [...assignments.entries()]) {
+      if (String(a.invoiceId) === invoiceId && String(a.id) !== String(next.id)) {
+        assignments.delete(k)
+      }
+    }
+    assignments.set(String(next.id), next)
+    persist(next)
+    return next
   }
-  assignments.set(id, next)
-  persist(next)
-  return next
+
+  const existingById = assignments.get(id)
+  if (existingById) {
+    if (!allowReplace) return existingById
+    return patchFrom(existingById)
+  }
+  const existingByInvoice = [...assignments.values()].find((a) => String(a.invoiceId) === invoiceId)
+  if (existingByInvoice) {
+    if (!allowReplace) return existingByInvoice
+    return patchFrom(existingByInvoice)
+  }
+  return patchFrom({
+    id,
+    acceptedAt: null,
+    deliveredAt: null,
+    proof: null,
+    createdAt: String(row.createdAt || new Date().toISOString())
+  })
 }
 
 export function createAssignment({
@@ -104,13 +140,46 @@ export function createAssignment({
   address
 }) {
   reloadAssignmentsFromDisk()
+  const inv = String(invoiceId)
+  const email = String(driverEmail).trim().toLowerCase()
+  const existing = [...assignments.values()].find((a) => String(a.invoiceId) === inv)
+
+  // Reassign same invoice to the new driver instead of creating duplicates.
+  if (existing) {
+    const row = {
+      ...existing,
+      driverEmail: email,
+      driverName: String(driverName || existing.driverName || 'Driver'),
+      invoiceNumber: String(invoiceNumber || existing.invoiceNumber || inv),
+      customerName: String(customerName || existing.customerName || 'Customer'),
+      customerEmail: String(customerEmail || existing.customerEmail || '')
+        .trim()
+        .toLowerCase(),
+      amount: Number(amount ?? existing.amount) || 0,
+      address: String(address || existing.address || ''),
+      status: existing.status === 'delivered' ? 'delivered' : 'assigned',
+      acceptedAt: existing.status === 'delivered' ? existing.acceptedAt : null,
+      deliveredAt: existing.status === 'delivered' ? existing.deliveredAt : null,
+      proof: existing.status === 'delivered' ? existing.proof : null,
+      updatedAt: new Date().toISOString()
+    }
+    for (const [k, a] of [...assignments.entries()]) {
+      if (String(a.invoiceId) === inv && String(a.id) !== String(row.id)) {
+        assignments.delete(k)
+      }
+    }
+    assignments.set(String(row.id), row)
+    persist(row)
+    return row
+  }
+
   const id = `asg_${Date.now()}_${Math.round(Math.random() * 1000)}`
   const row = {
     id,
-    driverEmail: String(driverEmail).trim().toLowerCase(),
+    driverEmail: email,
     driverName: String(driverName || 'Driver'),
-    invoiceId: String(invoiceId),
-    invoiceNumber: String(invoiceNumber || invoiceId),
+    invoiceId: inv,
+    invoiceNumber: String(invoiceNumber || inv),
     customerName: String(customerName || 'Customer'),
     customerEmail: String(customerEmail || '').trim().toLowerCase(),
     amount: Number(amount) || 0,

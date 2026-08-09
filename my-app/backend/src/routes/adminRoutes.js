@@ -66,7 +66,8 @@ import {
   withItemProductCategoryVirtual
 } from '../services/productCategoryZohoService.js'
 import { invalidateItemCategoryIndex } from '../services/itemCategoryIndexCache.js'
-import { createAssignment, getAssignmentById, listAssignments } from '../services/deliveryAssignmentStore.js'
+import { createAssignment, getAssignmentById, listAssignments, mirrorAssignmentNow } from '../services/deliveryAssignmentStore.js'
+import { clearDriverAssignmentZohoCache } from '../services/deliveryAssignmentResolve.js'
 import {
   notifyCustomerDriverAssigned,
   notifyCustomerOrderDelivered,
@@ -1222,6 +1223,8 @@ adminRoutes.post('/delivery-assignments', async (req, res, next) => {
       amount: Number(invoice.total) || 0,
       address: String(invoice.billing_address?.address || invoice.shipping_address?.address || '')
     })
+    clearDriverAssignmentZohoCache(driver.email)
+    await mirrorAssignmentNow(assignment)
     try {
       await upsertInvoiceAssignmentNote(assignment.invoiceId, assignment)
     } catch {

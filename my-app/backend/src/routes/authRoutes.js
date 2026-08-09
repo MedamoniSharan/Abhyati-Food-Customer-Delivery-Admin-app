@@ -84,8 +84,13 @@ authRoutes.post('/otp/send', async (req, res, next) => {
       throw err
     }
     const { mobile } = otpSendSchema.parse(req.body)
-    await sendOtp(mobile)
-    res.json({ message: 'OTP sent successfully', mobile: normalizeIndiaMobile(mobile) })
+    const result = await sendOtp(mobile)
+    res.json({
+      message: 'OTP sent successfully',
+      mobile: result.mobile,
+      // MSG91 request id — use this in MSG91 → Reports to see if SMS was delivered or DLT-failed.
+      requestId: result.requestId || undefined
+    })
   } catch (error) {
     next(error)
   }
