@@ -27,7 +27,7 @@ import { createLogger, serializeError } from '../util/logger.js'
 const log = createLogger('payment-routes')
 
 const lineItemSchema = z.object({
-  item_id: z.string().min(1).optional(),
+  item_id: z.string().min(1, 'item_id is required'),
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   quantity: z.number().positive(),

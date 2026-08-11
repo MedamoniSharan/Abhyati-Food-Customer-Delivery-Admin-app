@@ -16,15 +16,22 @@ export async function findAssignmentByInvoiceIdAsync(invoiceId) {
 
 export async function resolveProofPhotoResponse(assignment) {
   const invoiceId = assignment?.invoiceId
-  // Prefer the exact signed-invoice document id when Zoho stored it on the proof record.
-  const docId =
+  let photoDocumentId =
+    assignment?.proof?.photoDocumentId ||
+    assignment?.proof?.zoho?.photoDocumentId ||
     assignment?.proof?.zoho?.photo?.documents?.[0]?.document_id ||
     assignment?.proof?.zoho?.documents?.[0]?.document_id ||
     null
 
-  if (docId && invoiceId) {
+  // Legacy proofs: document id may only live in invoice delivery notes.
+  if (!photoDocumentId && typeof assignment?.proof?.notes === 'string') {
+    const m = assignment.proof.notes.match(/Signed invoice photo document:\s*(\S+)/i)
+    if (m?.[1]) photoDocumentId = m[1].trim()
+  }
+
+  if (photoDocumentId && invoiceId) {
     try {
-      const fromDoc = await getInvoiceDocumentFile(invoiceId, docId)
+      const fromDoc = await getInvoiceDocumentFile(invoiceId, photoDocumentId)
       if (fromDoc?.data?.length) {
         return {
           data: fromDoc.data,
@@ -33,11 +40,11 @@ export async function resolveProofPhotoResponse(assignment) {
         }
       }
     } catch {
-      /* fall through to invoice attachment */
+      /* fall through */
     }
   }
 
-  const zohoPhoto = await fetchZohoProofPhoto(invoiceId)
+  const zohoPhoto = await fetchZohoProofPhoto(invoiceId, photoDocumentId)
   if (zohoPhoto?.data?.length) {
     return {
       data: zohoPhoto.data,

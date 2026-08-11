@@ -23,6 +23,8 @@ type Props = {
   loadingMoreCatalog: boolean
   onLoadMoreCatalog: () => void
   catalogBootstrapping: boolean
+  /** Soft refresh (e.g. category change) while previous products are still on screen. */
+  catalogRefreshing?: boolean
 }
 
 export function HomeScreen({
@@ -43,6 +45,7 @@ export function HomeScreen({
   loadingMoreCatalog,
   onLoadMoreCatalog,
   catalogBootstrapping,
+  catalogRefreshing = false,
 }: Props) {
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
   const [filterOpen, setFilterOpen] = useState(false)
@@ -197,7 +200,13 @@ export function HomeScreen({
             <ProductGridSkeleton variant="grid" count={8} />
           </div>
         ) : (
-          <section className="product-grid">
+          <section className={`product-grid${catalogRefreshing ? ' product-grid--refreshing' : ''}`}>
+            {catalogRefreshing ? (
+              <div className="catalog-refresh-banner" role="status" aria-live="polite">
+                <span className="catalog-loader-spinner catalog-loader-spinner-sm" aria-hidden />
+                Updating products…
+              </div>
+            ) : null}
             {products.map((product) => (
               <ProductCard
                 key={product.id}
@@ -223,7 +232,7 @@ export function HomeScreen({
           </div>
         ) : null}
 
-        {!catalogBootstrapping && products.length === 0 ? (
+        {!catalogBootstrapping && !catalogRefreshing && products.length === 0 ? (
           <div className="empty-state">
             <h3>No products found</h3>
             <p>Try another keyword or category filter, or check back when new stock is listed.</p>

@@ -145,7 +145,7 @@ export async function addInvoiceDeliveryComment(invoiceId, description) {
 
 /**
  * Store delivery proof entirely in Zoho Books:
- * - Signed invoice photo → invoice attachment (receipt)
+ * - Signed invoice photo → Documents API (same reliable path as signature) + invoice attachment
  * - Signature → Documents + linked on invoice
  * - Recipient / delivery summary → invoice notes + comment
  */
@@ -154,11 +154,27 @@ export async function uploadFullDeliveryProofToZoho(
   { photo, signature, recipientName, notes }
 ) {
   const invId = String(invoiceId).trim()
-  const photoUpload = await uploadInvoiceAttachment(invId, {
+
+  // Prefer Documents API for photo so customer app can fetch via stable document_id
+  // (invoice attachment download is unreliable / often empty after other files attach).
+  const photoDocUpload = await uploadZohoDocument({
     buffer: photo.buffer,
-    mimetype: photo.mimetype,
+    mimetype: photo.mimetype || 'image/jpeg',
     originalname: photo.originalname || 'signed-invoice.jpg'
   })
+  const photoDocumentId = photoDocUpload.documentId
+  await attachDocumentToInvoice(invId, photoDocumentId)
+
+  let photoUpload = null
+  try {
+    photoUpload = await uploadInvoiceAttachment(invId, {
+      buffer: photo.buffer,
+      mimetype: photo.mimetype,
+      originalname: photo.originalname || 'signed-invoice.jpg'
+    })
+  } catch {
+    /* document path is enough for customer preview */
+  }
 
   let signatureDocumentId = null
   let signatureUpload = null
@@ -179,7 +195,7 @@ export async function uploadFullDeliveryProofToZoho(
     recipient ? `Received by: ${recipient}` : '',
     `Delivered at: ${deliveredAt}`,
     notes ? `Driver notes: ${notes}` : '',
-    'Signed invoice photo: attached to this invoice.',
+    photoDocumentId ? `Signed invoice photo document: ${photoDocumentId}` : 'Signed invoice photo: attached.',
     signatureDocumentId ? 'Customer signature: attached as invoice document.' : ''
   ]
     .filter(Boolean)
@@ -196,12 +212,28 @@ export async function uploadFullDeliveryProofToZoho(
   return {
     deliveredAt,
     photoUpload,
+    photoDocumentId,
     signatureDocumentId,
     signatureUpload
   }
 }
 
-export async function fetchZohoProofPhoto(invoiceId) {
+export async function fetchZohoProofPhoto(invoiceId, photoDocumentId = null) {
+  const docId = String(photoDocumentId || '').trim()
+  if (docId) {
+    try {
+      const fromDoc = await getInvoiceDocumentFile(invoiceId, docId)
+      if (fromDoc?.data?.length) {
+        return {
+          data: fromDoc.data,
+          contentType: fromDoc.contentType || 'image/jpeg',
+          fileName: 'signed-invoice.jpg'
+        }
+      }
+    } catch {
+      /* fall through */
+    }
+  }
   try {
     const attachment = await getInvoiceAttachment(invoiceId)
     return {

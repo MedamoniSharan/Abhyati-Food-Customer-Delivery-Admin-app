@@ -127,7 +127,7 @@ export function zohoUnitLabel(item: Record<string, unknown>): string {
   return 'carton'
 }
 
-const DEFAULT_MIN_ORDER = 10
+const DEFAULT_MIN_ORDER = 1
 
 /** Min order quantity: virtual field, custom field, or description hint, else default. */
 export function zohoMinOrderQuantity(item: Record<string, unknown> | null, fallback = DEFAULT_MIN_ORDER): number {

@@ -10,6 +10,7 @@ type Props = {
   onBackHome: () => void
   onIncrease: (productId: string | number) => void
   onDecrease: (productId: string | number) => void
+  onRemove: (productId: string | number) => void
   onCheckout: (mode: CheckoutPaymentMode) => void
   checkoutBusy?: boolean
 }
@@ -19,6 +20,7 @@ export function CartScreen({
   onBackHome,
   onIncrease,
   onDecrease,
+  onRemove,
   onCheckout,
   checkoutBusy = false
 }: Props) {
@@ -45,7 +47,9 @@ export function CartScreen({
           </div>
         ) : null}
 
-        {cartItems.map((item) => (
+        {cartItems.map((item) => {
+          const minQty = item.product.minPurchaseCount ?? 1
+          return (
           <article key={item.product.id} className="order-card">
             <div className="order-main">
               <ProductImage product={item.product} />
@@ -53,22 +57,40 @@ export function CartScreen({
                 <h3>{item.product.name}</h3>
                 <p>{item.product.subtitle}</p>
                 <strong>{formatInr(item.product.priceInr * item.quantity)}</strong>
+                {minQty > 1 ? <p className="cart-line-moq">Min. order: {minQty}{item.product.unit ? ` ${item.product.unit}` : ''}</p> : null}
               </div>
             </div>
-            <div className="qty-inline">
-              <button type="button" className="counter-btn" onClick={() => onDecrease(item.product.id)}>
-                <span className="material-symbols-outlined">remove</span>
-              </button>
-              <strong>
-                {item.quantity}
-                {item.product.unit ? ` ${item.product.unit}` : ''}
-              </strong>
-              <button type="button" className="counter-btn" onClick={() => onIncrease(item.product.id)}>
-                <span className="material-symbols-outlined">add</span>
+            <div className="cart-line-actions">
+              <div className="qty-inline">
+                <button
+                  type="button"
+                  className="counter-btn"
+                  aria-label={item.quantity <= minQty ? 'Remove from cart' : 'Decrease quantity'}
+                  onClick={() => onDecrease(item.product.id)}
+                >
+                  <span className="material-symbols-outlined">remove</span>
+                </button>
+                <strong>
+                  {item.quantity}
+                  {item.product.unit ? ` ${item.product.unit}` : ''}
+                </strong>
+                <button type="button" className="counter-btn" aria-label="Increase quantity" onClick={() => onIncrease(item.product.id)}>
+                  <span className="material-symbols-outlined">add</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                className="cart-remove-btn"
+                aria-label={`Remove ${item.product.name}`}
+                onClick={() => onRemove(item.product.id)}
+              >
+                <span className="material-symbols-outlined">delete</span>
+                Remove
               </button>
             </div>
           </article>
-        ))}
+          )
+        })}
       </main>
 
       {cartItems.length > 0 ? (

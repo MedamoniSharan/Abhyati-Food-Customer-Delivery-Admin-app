@@ -305,9 +305,11 @@ deliveryAuthRoutes.post('/assignments/:id/proof', proofUpload, async (req, res, 
         mimeType: photo.mimetype,
         uploadedAt: zohoProof.deliveredAt,
         notes,
+        photoDocumentId: zohoProof.photoDocumentId,
         signatureDocumentId: zohoProof.signatureDocumentId,
         zoho: {
           photo: zohoProof.photoUpload,
+          photoDocumentId: zohoProof.photoDocumentId,
           signatureDocumentId: zohoProof.signatureDocumentId
         }
       }

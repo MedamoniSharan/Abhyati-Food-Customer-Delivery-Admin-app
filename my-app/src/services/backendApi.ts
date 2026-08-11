@@ -79,8 +79,8 @@ function mapZohoItemToProduct(item: ZohoItem, index: number): Product {
     priceInr: normalizePrice(item.rate ?? item.purchase_rate, 0),
     image: FALLBACK_PRODUCT_IMAGE,
     category: zohoItemCategory(item),
+    minPurchaseCount: Math.max(1, minPurchaseCount),
     ...(avail != null ? { availableStock: avail } : {}),
-    ...(minPurchaseCount > 1 ? { minPurchaseCount } : {}),
     ...(unit ? { unit } : {}),
   }
 }
@@ -125,6 +125,15 @@ type RequestOptions = {
   headers?: HeadersInit
 }
 
+class ClientApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ClientApiError'
+    this.status = status
+  }
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   logApiCandidatesOnce(API_BASE_URL_CANDIDATES)
   let lastError: unknown = null
@@ -141,10 +150,28 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
         headers,
       })
       if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`)
+        let message = `Request failed with status ${response.status}`
+        try {
+          const body = (await response.json()) as {
+            message?: string
+            zoho?: { message?: string } | string
+          }
+          const zohoMsg =
+            body?.zoho && typeof body.zoho === 'object' && typeof body.zoho.message === 'string'
+              ? body.zoho.message.trim()
+              : ''
+          if (zohoMsg) message = zohoMsg
+          else if (typeof body?.message === 'string' && body.message.trim()) message = body.message.trim()
+        } catch {
+          /* keep status message */
+        }
+        throw new ClientApiError(message, response.status)
       }
       return response.json() as Promise<T>
     } catch (error) {
+      if (error instanceof ClientApiError && error.status >= 400 && error.status < 500) {
+        throw error
+      }
       lastError = error
       console.warn('[API] request failed', { baseUrl, path, error })
     }
@@ -267,11 +294,17 @@ type CheckoutLineInput = {
   rate: number
 }
 
-export async function createCustomerOrder(lineItems: CheckoutLineInput[]): Promise<Order | null> {
+export async function createCustomerOrder(
+  lineItems: CheckoutLineInput[],
+  opts?: { referenceNumber?: string }
+): Promise<Order | null> {
   const data = await request<{ order?: ZohoSalesOrder }>('/api/customer/orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ line_items: lineItems }),
+    body: JSON.stringify({
+      line_items: lineItems,
+      ...(opts?.referenceNumber ? { reference_number: opts.referenceNumber } : {}),
+    }),
   })
   const raw = data.order
   if (raw && typeof raw === 'object') {

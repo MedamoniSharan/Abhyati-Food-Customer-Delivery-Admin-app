@@ -118,6 +118,10 @@ export function AuthScreen({ onAuthenticated }: Props) {
       showToast('Enter your email address', { variant: 'error' })
       return false
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      showToast('Enter a valid email address', { variant: 'error' })
+      return false
+    }
     if (!looksLikeIndiaMobile(mob)) {
       showToast('Enter a valid 10-digit Indian mobile number', { variant: 'error' })
       return false

@@ -49,7 +49,7 @@ export function ProductDetailsScreen({ product, onBack, onOpenCart, onAddToCart,
   const [detailLoading, setDetailLoading] = useState(Boolean(product.zohoItemId))
   const [detailError, setDetailError] = useState<string | null>(null)
 
-  const [quantity, setQuantity] = useState(10)
+  const [quantity, setQuantity] = useState(() => product.minPurchaseCount ?? 1)
 
   useEffect(() => {
     if (!product.zohoItemId) {
@@ -72,7 +72,10 @@ export function ProductDetailsScreen({ product, onBack, onOpenCart, onAddToCart,
     }
   }, [product.zohoItemId])
 
-  const minOrder = useMemo(() => zohoMinOrderQuantity(detail), [detail])
+  const minOrder = useMemo(
+    () => (detail ? zohoMinOrderQuantity(detail, product.minPurchaseCount ?? 1) : product.minPurchaseCount ?? 1),
+    [detail, product.minPurchaseCount],
+  )
 
   const stockCap = useMemo(() => {
     if (detail) return zohoAvailableStockQuantity(detail)
@@ -116,9 +119,11 @@ export function ProductDetailsScreen({ product, onBack, onOpenCart, onAddToCart,
       name: displayName,
       priceInr: displayRate,
       subtitle: desc,
+      minPurchaseCount: minOrder,
+      ...(unitLabel ? { unit: unitLabel } : {}),
       ...(stockCap != null ? { availableStock: stockCap } : {}),
     }
-  }, [product, displayName, displayRate, detail, stockCap])
+  }, [product, displayName, displayRate, detail, stockCap, minOrder, unitLabel])
 
   function bumpQuantity(delta: 1 | -1) {
     if (stockInsufficientForMin) return

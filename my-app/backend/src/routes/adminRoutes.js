@@ -376,7 +376,9 @@ const simpleItemCreateSchema = z.object({
   sku: z.string().optional(),
   unit: z.string().optional(),
   description: z.string().optional(),
-  product_type: z.enum(['goods', 'service', 'digital_service']).default('goods')
+  product_type: z.enum(['goods', 'service', 'digital_service']).default('goods'),
+  /** Zoho Books: sales | inventory | purchases — sales items can be added to invoices without stock. */
+  item_type: z.enum(['sales', 'inventory', 'purchases']).optional()
 })
 
 adminRoutes.post('/login', (req, res, next) => {
@@ -1690,12 +1692,22 @@ adminRoutes.post('/items', async (req, res, next) => {
     let payload
     if (raw && typeof raw === 'object' && typeof raw.name === 'string' && raw.name.trim() && 'rate' in raw) {
       const parsed = simpleItemCreateSchema.parse(raw)
+      // Default to sales-type goods so newly created catalog items can be invoiced immediately
+      // (inventory items often fail checkout until accounts/stock are configured).
+      const itemType = parsed.item_type || 'inventory'
+      // Zoho org may require SKU as a mandatory field — auto-generate when admin leaves it blank.
+      const sku =
+        parsed.sku?.trim() ||
+        `SKU-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
       payload = {
         name: parsed.name.trim(),
         rate: parsed.rate,
         product_type: parsed.product_type,
+        // Prefer inventory (matches existing sellable catalog items). Plain "sales" items can
+        // inherit an org-default GST that is expired and blocks invoice creation.
+        item_type: itemType,
         unit: parsed.unit?.trim() || 'unit',
-        ...(parsed.sku?.trim() ? { sku: parsed.sku.trim() } : {}),
+        sku,
         ...(parsed.description?.trim() ? { description: parsed.description.trim() } : {})
       }
     } else {
@@ -1705,6 +1717,20 @@ adminRoutes.post('/items', async (req, res, next) => {
     appendAdminAudit({ action: 'admin_create_item', meta: { item: data?.item?.item_id } })
     invalidateItemCategoryIndex()
     const newId = data?.item?.item_id != null ? String(data.item.item_id) : ''
+    // New Zoho items inherit org-default GST12 preferences which are expired in this org and
+    // block invoice creation. Align new items to zero-rate GST0/IGST0 used by sellable catalog items.
+    if (newId) {
+      try {
+        await updateModule('/items', newId, {
+          item_tax_preferences: [
+            { tax_specification: 'intra', tax_id: '2179961000000028364' }, // GST0
+            { tax_specification: 'inter', tax_id: '2179961000000028304' } // IGST0
+          ]
+        })
+      } catch {
+        /* non-fatal — checkout may still fail until taxes are fixed in Zoho */
+      }
+    }
     if (newId && raw && typeof raw === 'object') {
       try {
         const fresh = await getModuleById('/items', newId)

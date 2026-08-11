@@ -16,6 +16,7 @@ import {
 import {
   adjustInventoryForCheckout,
   createZohoOrderAndInvoice,
+  findExistingInvoiceByReference,
   resolveCheckoutLineItems,
   resolveCustomerContactForCheckout
 } from '../services/orderCheckoutService.js'
@@ -42,7 +43,7 @@ import {
 import { enrichMinPurchaseOnItemResponse, enrichMinPurchaseOnItemsListResponse, getZohoItemMinPurchaseFieldId } from '../services/zohoItemMinPurchase.js'
 
 const lineItemSchema = z.object({
-  item_id: z.string().min(1).optional(),
+  item_id: z.string().min(1, 'item_id is required'),
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   quantity: z.number().positive(),
@@ -51,7 +52,7 @@ const lineItemSchema = z.object({
 
 const createOrderSchema = z.object({
   line_items: z.array(lineItemSchema).min(1),
-  reference_number: z.string().optional()
+  reference_number: z.string().max(100).optional()
 })
 
 const listQuerySchema = z.object({
@@ -135,12 +136,32 @@ async function listCustomerItemsForApp(query, customerEmail) {
   }
 
   if (!isProductCategoryConfigured()) {
-    // No Zoho category CF configured — fall back to empty filter result rather than a full catalog scan.
+    // No Zoho category CF — return the normal catalog page so the client can filter locally.
+    // (Previously returned an empty list, which made category chips / filter appear broken.)
+    const data = await listModule('/items', { page: pageNum, per_page: perPage })
+    const batch = Array.isArray(data?.items) ? data.items : []
+    const { items: hydratedList } = await hydrateItemsListRowsForProductCategoryField(batch, {
+      concurrency: CATEGORY_HYDRATE_CONCURRENCY,
+      hydrateCategory: true,
+      hydrateCustomerName: true
+    })
+    let out = applyTierToItemsResponse({ ...data, items: hydratedList }, tier)
+    if (getZohoItemMinPurchaseFieldId()) out = enrichMinPurchaseOnItemsListResponse(out)
+    const want = categoryFilter.toLowerCase()
+    const filtered = (out.items || []).filter((item) => {
+      const name = String(item?.category_name || item?.category || '').trim().toLowerCase()
+      return name && name === want
+    })
     return {
       code: 0,
       message: 'success',
-      items: [],
-      page_context: { page: pageNum, per_page: perPage, has_more_page: false }
+      items: filtered,
+      page_context: {
+        page: pageNum,
+        per_page: perPage,
+        has_more_page: Boolean(out.page_context?.has_more_page)
+      },
+      category_filter_mode: 'client_fallback'
     }
   }
 
@@ -215,19 +236,37 @@ customerRoutes.post('/orders', async (req, res, next) => {
     const body = createOrderSchema.parse(req.body)
     const customer = req.customer
     const { customerId, deliveryAddressBlock } = await resolveCustomerContactForCheckout(customer)
+    const referenceNumber =
+      String(body.reference_number || '').trim() ||
+      `app-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
+    const existing = await findExistingInvoiceByReference(customerId, referenceNumber)
+    if (existing) {
+      const order = mapInvoiceToOrder(existing, null)
+      res.status(200).json({
+        message: 'Order already created',
+        salesorder: null,
+        invoice: existing,
+        inventory_adjustments: { created: [], skipped: ['idempotent_replay'], errors: [] },
+        ...(order ? { order } : {}),
+        idempotent: true
+      })
+      return
+    }
+
     const resolvedLines = await resolveCheckoutLineItems(body.line_items, customer.email)
 
-    const { salesOrderData, invoice, salesorder } = await createZohoOrderAndInvoice({
+    const { invoice, salesorder } = await createZohoOrderAndInvoice({
       customerId,
       resolvedLines,
-      referenceNumber: body.reference_number,
+      referenceNumber,
       deliveryAddressBlock
     })
 
     const order = invoice ? mapInvoiceToOrder(invoice, null) : null
     const refLabel =
       String(
-        invoice?.invoice_number || invoice?.reference_number || body.reference_number || 'app-order'
+        invoice?.invoice_number || invoice?.reference_number || referenceNumber || 'app-order'
       ).trim() || 'app-order'
     const inventory_adjustments = await adjustInventoryForCheckout(resolvedLines, refLabel)
 
@@ -235,7 +274,7 @@ customerRoutes.post('/orders', async (req, res, next) => {
       notifyCustomerOrderPlaced({
         customerEmail: customer.email,
         invoiceId: invoice?.invoice_id,
-        invoiceNumber: invoice?.invoice_number || invoice?.reference_number || body.reference_number,
+        invoiceNumber: invoice?.invoice_number || invoice?.reference_number || referenceNumber,
         amountInr: invoice?.total
       })
     } catch {

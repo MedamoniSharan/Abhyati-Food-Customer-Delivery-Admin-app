@@ -27,8 +27,11 @@ export function errorHandler(error, req, res, _next) {
       path,
       issues: error.issues.slice(0, 8)
     })
+    const first = error.issues[0]
+    const firstMsg =
+      first && typeof first.message === 'string' && first.message.trim() ? first.message.trim() : null
     return res.status(400).json({
-      message: 'Invalid request payload',
+      message: firstMsg || 'Invalid request payload',
       errors: error.flatten().fieldErrors
     })
   }
@@ -68,7 +71,7 @@ export function errorHandler(error, req, res, _next) {
     return res.status(status).json({
       message: isRateLimited
         ? 'Zoho API is busy — automatic retries were exhausted. Try again shortly.'
-        : 'Zoho API request failed',
+        : zohoMsg || 'Zoho API request failed',
       zoho: zohoBody || error.message,
       ...(isRateLimited ? { zoho_rate_limit: true } : {}),
       ...(needsAuthHint

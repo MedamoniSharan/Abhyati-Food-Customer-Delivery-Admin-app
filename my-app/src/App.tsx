@@ -29,6 +29,8 @@ function App() {
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(() => (readSignedIn() ? readSessionUser() : null))
   const [checkoutBusy, setCheckoutBusy] = useState(false)
   const [serverCategoryNames, setServerCategoryNames] = useState<string[]>([])
+  /** Keep last known product-derived categories so chips don't vanish while a page reloads. */
+  const [cachedProductCategoryNames, setCachedProductCategoryNames] = useState<string[]>([])
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([])
   const [orderHistory, setOrderHistory] = useState<Order[]>([])
   const [ordersLoadError, setOrdersLoadError] = useState<string | null>(null)
@@ -42,9 +44,13 @@ function App() {
   const [hasMoreCatalogItems, setHasMoreCatalogItems] = useState(true)
   /** True while restoring session so home can show bootstrap loader before first Zoho fetch. */
   const [loadingCatalog, setLoadingCatalog] = useState(readSignedIn)
+  const [catalogHardReloading, setCatalogHardReloading] = useState(false)
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null)
+  const [serverCategoriesConfigured, setServerCategoriesConfigured] = useState(false)
   const catalogFetchLock = useRef(false)
   const catalogFetchGeneration = useRef(0)
+  const checkoutInFlightRef = useRef(false)
+  const serverCategoriesConfiguredRef = useRef(false)
 
   useEffect(() => {
     document.body.dataset.toastLayout = isAuthenticated ? 'main' : 'auth'
@@ -91,11 +97,15 @@ function App() {
   useEffect(() => {
     if (!isAuthenticated) {
       setServerCategoryNames([])
+      setCachedProductCategoryNames([])
+      setServerCategoriesConfigured(false)
       return
     }
     let cancelled = false
     void fetchCustomerProductCategories().then(({ configured, categories }) => {
       if (cancelled) return
+      setServerCategoriesConfigured(Boolean(configured))
+      serverCategoriesConfiguredRef.current = Boolean(configured)
       if (configured && categories.length > 0) {
         setServerCategoryNames(
           categories.map((c) => String(c.name || '').trim()).filter((n) => n.length > 0)
@@ -134,6 +144,8 @@ function App() {
         setSessionUser(user)
       }
       const { configured, categories } = await fetchCustomerProductCategories()
+      setServerCategoriesConfigured(Boolean(configured))
+      serverCategoriesConfiguredRef.current = Boolean(configured)
       if (configured && categories.length > 0) {
         setServerCategoryNames(
           categories.map((c) => String(c.name || '').trim()).filter((n) => n.length > 0)
@@ -143,8 +155,11 @@ function App() {
       }
       catalogFetchLock.current = true
       setLoadingCatalog(true)
+      setCatalogHardReloading(true)
       try {
-        const catOpt = selectedCategory === 'All Items' ? undefined : selectedCategory
+        const useServerCategory =
+          serverCategoriesConfiguredRef.current && selectedCategory !== 'All Items'
+        const catOpt = useServerCategory ? selectedCategory : undefined
         const { products: firstPage, hasMore } = await fetchZohoItemsPage(1, 20, { categoryName: catOpt })
         setCatalogProducts(firstPage)
         setHasMoreCatalogItems(hasMore)
@@ -159,6 +174,7 @@ function App() {
       } finally {
         catalogFetchLock.current = false
         setLoadingCatalog(false)
+        setCatalogHardReloading(false)
       }
       await refreshOrderHistory()
       showToast('Refreshed', { variant: 'success' })
@@ -186,7 +202,9 @@ function App() {
     setLoadingCatalog(true)
     try {
       const page = nextItemsPage
-      const catOpt = selectedCategory === 'All Items' ? undefined : selectedCategory
+      const useServerCategory =
+        serverCategoriesConfiguredRef.current && selectedCategory !== 'All Items'
+      const catOpt = useServerCategory ? selectedCategory : undefined
       const { products, hasMore } = await fetchZohoItemsPage(page, 20, { categoryName: catOpt })
       if (generation !== catalogFetchGeneration.current) return
       setCatalogProducts((prev) => {
@@ -221,10 +239,13 @@ function App() {
     let cancelled = false
     catalogFetchLock.current = true
     setLoadingCatalog(true)
-    setCatalogProducts([])
+    setCatalogHardReloading(true)
+    // Keep previous products visible while fetching to avoid empty flash / category chip collapse.
     setNextItemsPage(1)
     setHasMoreCatalogItems(true)
-    const catOpt = selectedCategory === 'All Items' ? undefined : selectedCategory
+    const useServerCategory =
+      serverCategoriesConfiguredRef.current && selectedCategory !== 'All Items'
+    const catOpt = useServerCategory ? selectedCategory : undefined
     void (async () => {
       try {
         const { products: firstPage, hasMore } = await fetchZohoItemsPage(1, 20, { categoryName: catOpt })
@@ -250,13 +271,13 @@ function App() {
         if (!cancelled && generation === catalogFetchGeneration.current) {
           catalogFetchLock.current = false
           setLoadingCatalog(false)
+          setCatalogHardReloading(false)
         }
       }
     })()
     return () => {
       cancelled = true
-      catalogFetchLock.current = false
-      setLoadingCatalog(false)
+      // Do not flip loadingCatalog off here — a newer generation owns the spinner.
     }
   }, [isAuthenticated, selectedCategory, showToast])
 
@@ -286,7 +307,7 @@ function App() {
 
   const visibleProducts = useMemo(() => {
     const catalogHasZohoItems = catalogProducts.some((p) => p.zohoItemId)
-    const serverFiltered = selectedCategory !== 'All Items'
+    const serverFiltered = serverCategoriesConfigured && selectedCategory !== 'All Items'
     return catalogProducts.filter((product) => {
       if (catalogHasZohoItems && !product.zohoItemId) return false
       const matchCategory = serverFiltered
@@ -301,25 +322,43 @@ function App() {
         product.category.toLowerCase().includes(term)
       return matchCategory && matchQuery
     })
-  }, [catalogProducts, searchQuery, selectedCategory])
+  }, [catalogProducts, searchQuery, selectedCategory, serverCategoriesConfigured])
 
   const catalogCategories = useMemo(() => {
     if (serverCategoryNames.length > 0) {
       return ['All Items', ...serverCategoryNames.slice().sort((a, b) => a.localeCompare(b))]
     }
-    const names = new Set<string>()
+    const names = new Set<string>(cachedProductCategoryNames)
     for (const p of catalogProducts) {
       const c = p.category?.trim()
       if (c) names.add(c)
     }
     return ['All Items', ...Array.from(names).sort((a, b) => a.localeCompare(b))]
-  }, [catalogProducts, serverCategoryNames])
+  }, [catalogProducts, serverCategoryNames, cachedProductCategoryNames])
 
   useEffect(() => {
+    if (serverCategoryNames.length > 0) return
+    const names = new Set<string>(cachedProductCategoryNames)
+    let changed = false
+    for (const p of catalogProducts) {
+      const c = p.category?.trim()
+      if (c && !names.has(c)) {
+        names.add(c)
+        changed = true
+      }
+    }
+    if (changed) {
+      setCachedProductCategoryNames(Array.from(names).sort((a, b) => a.localeCompare(b)))
+    }
+  }, [catalogProducts, serverCategoryNames, cachedProductCategoryNames])
+
+  useEffect(() => {
+    // Only reset when the selected category is truly gone from a stable list (not during empty bootstrap).
+    if (loadingCatalog && catalogProducts.length === 0 && serverCategoryNames.length === 0) return
     if (!catalogCategories.includes(selectedCategory)) {
       setSelectedCategory('All Items')
     }
-  }, [catalogCategories, selectedCategory])
+  }, [catalogCategories, selectedCategory, loadingCatalog, catalogProducts.length, serverCategoryNames.length])
 
   useEffect(() => {
     if (screen === 'product' && !selectedProduct) {
@@ -370,19 +409,25 @@ function App() {
       showToast(`Available stock is ${cap}. You can only order up to that amount.`, { variant: 'warning' })
       return
     }
+    // At (or below) MOQ, minus removes the line — same as Delete.
     if (type === 'decrease' && line.quantity <= minQty) {
-      showToast(`Minimum order is ${minQty}${line.product.unit ? ` ${line.product.unit}` : ''}.`, { variant: 'warning' })
+      setCartItems((current) => current.filter((item) => item.product.id !== productId))
+      showToast(`${line.product.name} removed from cart`, { variant: 'info' })
       return
     }
     setCartItems((current) =>
-      current
-        .map((item) => {
-          if (item.product.id !== productId) return item
-          const nextQty = type === 'increase' ? item.quantity + 1 : Math.max(minQty, item.quantity - 1)
-          return { ...item, quantity: nextQty }
-        })
-        .filter((item) => item.quantity > 0),
+      current.map((item) => {
+        if (item.product.id !== productId) return item
+        const nextQty = type === 'increase' ? item.quantity + 1 : Math.max(minQty, item.quantity - 1)
+        return { ...item, quantity: nextQty }
+      }),
     )
+  }
+
+  function removeFromCart(productId: string | number) {
+    const line = cartItems.find((item) => item.product.id === productId)
+    setCartItems((current) => current.filter((item) => item.product.id !== productId))
+    if (line) showToast(`${line.product.name} removed from cart`, { variant: 'info' })
   }
 
   function openProduct(product: Product) {
@@ -409,8 +454,16 @@ function App() {
   }
 
   async function handleCheckout(mode: CheckoutPaymentMode = 'pay_later') {
+    if (checkoutInFlightRef.current || checkoutBusy) return
     if (cartItems.length === 0) {
       showToast('Your cart is empty. Add items before checkout.', { variant: 'warning' })
+      return
+    }
+    const missingZoho = cartItems.filter((line) => !line.product.zohoItemId)
+    if (missingZoho.length > 0) {
+      showToast('Some cart items are missing catalog ids. Remove them and add again from Home.', {
+        variant: 'error',
+      })
       return
     }
     const token = readAuthToken()
@@ -443,11 +496,13 @@ function App() {
       quantity: line.quantity,
       rate: Number(line.product.priceInr) || 0
     }))
+    const referenceNumber = `app-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
+    checkoutInFlightRef.current = true
     setCheckoutBusy(true)
     try {
       if (mode === 'pay_later') {
-        await createCustomerOrder(lineItems)
+        await createCustomerOrder(lineItems, { referenceNumber })
         setCartItems([])
         await refreshOrderHistory()
         setScreen('orders')
@@ -463,13 +518,13 @@ function App() {
         currency: rzpOrder.currency,
         user: freshUser
       })
-      setCartItems([])
       try {
         await verifyRazorpayPayment({
           razorpay_order_id: paymentResult.razorpay_order_id,
           razorpay_payment_id: paymentResult.razorpay_payment_id,
           razorpay_signature: paymentResult.razorpay_signature
         })
+        setCartItems([])
         await refreshOrderHistory()
         setScreen('orders')
         showToast('Payment successful. Order placed and synced to admin.', { variant: 'success' })
@@ -478,6 +533,7 @@ function App() {
         const verifyMessage =
           verifyError instanceof Error ? verifyError.message : 'Payment verification failed'
         if (verifyMessage.toLowerCase().includes('already processed')) {
+          setCartItems([])
           setScreen('orders')
           showToast('Payment successful. Order placed and synced to admin.', { variant: 'success' })
         } else {
@@ -494,6 +550,7 @@ function App() {
         showToast(message, { variant: 'error' })
       }
     } finally {
+      checkoutInFlightRef.current = false
       setCheckoutBusy(false)
     }
   }
@@ -516,9 +573,10 @@ function App() {
           onCloseMenu={() => setIsMenuOpen(false)}
           onNavigateMenu={navigateFromMenu}
           hasMoreCatalog={hasMoreCatalogItems}
-          loadingMoreCatalog={loadingCatalog && catalogProducts.length > 0}
+          loadingMoreCatalog={loadingCatalog && catalogProducts.length > 0 && !catalogHardReloading}
           onLoadMoreCatalog={loadMoreCatalogIfNeeded}
           catalogBootstrapping={loadingCatalog && catalogProducts.length === 0}
+          catalogRefreshing={catalogHardReloading && catalogProducts.length > 0}
         />
       )
     }
@@ -584,6 +642,7 @@ function App() {
           onBackHome={() => setScreen('home')}
           onIncrease={(productId) => updateCartQuantity(productId, 'increase')}
           onDecrease={(productId) => updateCartQuantity(productId, 'decrease')}
+          onRemove={removeFromCart}
           onCheckout={(mode) => void handleCheckout(mode)}
           checkoutBusy={checkoutBusy}
         />
@@ -618,6 +677,10 @@ function App() {
           setCartItems([])
           setOrderHistory([])
           setCatalogProducts([])
+          setCachedProductCategoryNames([])
+          setServerCategoryNames([])
+          setServerCategoriesConfigured(false)
+          serverCategoriesConfiguredRef.current = false
           setNextItemsPage(1)
           setHasMoreCatalogItems(true)
           setSelectedProduct(null)
