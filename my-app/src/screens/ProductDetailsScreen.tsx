@@ -31,19 +31,46 @@ function fallbackSpecRows(product: Product): ZohoSpecRow[] {
   return rows
 }
 
+function singularUnit(unit: string): string {
+  const u = unit.trim().toLowerCase()
+  if (u === 'pcs' || u === 'pc' || u === 'pieces' || u === 'piece') return 'piece'
+  if (u.endsWith('s') && u.length > 3) return u.slice(0, -1)
+  return u || 'piece'
+}
+
+/** Preset quantity chips like 50 / 100 / 250 / 500, scaled from MOQ. */
+function buildQuantityPresets(minOrder: number, stockCap: number | null): number[] {
+  let presets: number[]
+  if (minOrder <= 1) {
+    presets = [1, 10, 25, 50]
+  } else if (minOrder <= 10) {
+    presets = [minOrder, minOrder * 5, minOrder * 10, minOrder * 25]
+  } else {
+    presets = [minOrder, minOrder * 2, Math.round(minOrder * 5), minOrder * 10]
+  }
+  presets = [...new Set(presets.filter((n) => Number.isFinite(n) && n >= minOrder))].sort((a, b) => a - b)
+  if (stockCap != null) {
+    presets = presets.filter((n) => n <= stockCap)
+    if (presets.length === 0 && stockCap >= minOrder) presets = [minOrder]
+  }
+  return presets.slice(0, 4)
+}
+
 function ProductDetailPageSkeleton() {
   return (
-    <div className="product-detail-skeleton-wrap" aria-hidden>
-      <div className="product-skeleton-shimmer product-detail-skel-hero" />
-      <div className="product-skeleton-shimmer product-detail-skel-line title" />
-      <div className="product-skeleton-shimmer product-detail-skel-line short" />
-      <div className="product-skeleton-shimmer product-detail-skel-card" />
-      <div className="product-skeleton-shimmer product-detail-skel-card" />
+    <div className="pd-v2-skeleton" aria-hidden>
+      <div className="product-skeleton-shimmer pd-v2-skel-hero" />
+      <div className="pd-v2-skel-body">
+        <div className="product-skeleton-shimmer product-detail-skel-line short" />
+        <div className="product-skeleton-shimmer product-detail-skel-line title" />
+        <div className="product-skeleton-shimmer product-detail-skel-line short" />
+        <div className="product-skeleton-shimmer product-detail-skel-card" />
+      </div>
     </div>
   )
 }
 
-export function ProductDetailsScreen({ product, onBack, onOpenCart, onAddToCart, onBuyNow }: Props) {
+export function ProductDetailsScreen({ product, onBack, onAddToCart, onBuyNow }: Props) {
   const { showToast } = useToast()
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null)
   const [detailLoading, setDetailLoading] = useState(Boolean(product.zohoItemId))
@@ -85,13 +112,18 @@ export function ProductDetailsScreen({ product, onBack, onOpenCart, onAddToCart,
 
   const stockInsufficientForMin = stockCap != null && stockCap < minOrder
 
+  const presets = useMemo(() => buildQuantityPresets(minOrder, stockCap), [minOrder, stockCap])
+
   useEffect(() => {
     setQuantity((q) => {
       let n = Math.max(minOrder, q)
       if (stockCap != null) n = Math.min(n, stockCap)
+      if (presets.length > 0 && !presets.includes(n)) {
+        n = presets[0]
+      }
       return n
     })
-  }, [minOrder, stockCap])
+  }, [minOrder, stockCap, presets])
 
   const displayName =
     detail && detail.name != null && String(detail.name).trim()
@@ -99,8 +131,17 @@ export function ProductDetailsScreen({ product, onBack, onOpenCart, onAddToCart,
       : product.name
 
   const displayRate = detail ? (zohoRateInr(detail) ?? product.priceInr) : product.priceInr
-  const unitLabel = detail ? zohoUnitLabel(detail) : 'carton'
+  const unitLabel = detail ? zohoUnitLabel(detail) : product.unit || 'piece'
+  const unitSingular = singularUnit(unitLabel)
   const stockLine = detail ? zohoStockLine(detail) : 'In stock, ready to ship'
+
+  const aboutText = useMemo(() => {
+    if (detail && typeof detail.description === 'string' && detail.description.trim()) {
+      return detail.description.trim()
+    }
+    if (product.subtitle.trim()) return product.subtitle.trim()
+    return null
+  }, [detail, product.subtitle])
 
   const specRows: ZohoSpecRow[] = useMemo(() => {
     if (detail) return zohoItemToSpecRows(detail)
@@ -125,143 +166,148 @@ export function ProductDetailsScreen({ product, onBack, onOpenCart, onAddToCart,
     }
   }, [product, displayName, displayRate, detail, stockCap, minOrder, unitLabel])
 
-  function bumpQuantity(delta: 1 | -1) {
+  function selectPreset(next: number) {
     if (stockInsufficientForMin) return
-    setQuantity((q) => {
-      const next = q + delta
-      if (delta > 0 && stockCap != null && next > stockCap) {
-        showToast(
-          `Available stock is ${stockCap} ${unitLabel}. You can only order up to that amount.`,
-          { variant: 'warning' },
-        )
-        return q
-      }
-      if (delta < 0) return Math.max(minOrder, next)
-      return next
-    })
+    if (stockCap != null && next > stockCap) {
+      showToast(
+        `Available stock is ${stockCap} ${unitLabel}. You can only order up to that amount.`,
+        { variant: 'warning' },
+      )
+      return
+    }
+    setQuantity(Math.max(minOrder, next))
   }
 
   const showBootstrapLoader = detailLoading && Boolean(product.zohoItemId)
+  const badgeLabel = product.badge?.label || 'Eco-friendly'
+  const categoryLabel = (product.category || 'Product').trim().toUpperCase()
 
   return (
-    <>
-      <header className="top-header light-header">
-        <div className="header-row centered-title">
-          <button type="button" className="icon-btn" onClick={onBack}>
+    <div className="pd-v2">
+      {showBootstrapLoader ? (
+        <main className="pd-v2-main pd-v2-loading">
+          <button type="button" className="pd-v2-back" onClick={onBack} aria-label="Back">
             <span className="material-symbols-outlined">arrow_back</span>
           </button>
-          <h1>Product Details</h1>
-          <button type="button" className="icon-btn with-dot" onClick={onOpenCart}>
-            <span className="material-symbols-outlined">shopping_cart</span>
-          </button>
-        </div>
-      </header>
-
-      {showBootstrapLoader ? (
-        <main className="content product-content product-detail-loading-main">
           <CatalogLoader label="Loading product details…" />
           <ProductDetailPageSkeleton />
         </main>
       ) : (
-        <main className="content product-content">
-          <section className="gallery">
-            <div className="hero-image">
-              <ProductImage product={product} />
-              {product.badge ? (
-                <span className={`hero-tag hero-tag-${product.badge.tone}`}>{product.badge.label}</span>
+        <>
+          <main className="pd-v2-main">
+            <section className="pd-v2-hero">
+              <ProductImage product={product} className="pd-v2-hero-img" />
+              <button type="button" className="pd-v2-back" onClick={onBack} aria-label="Back">
+                <span className="material-symbols-outlined">arrow_back</span>
+              </button>
+              <span className="pd-v2-eco-badge">
+                <span className="material-symbols-outlined">eco</span>
+                {badgeLabel}
+              </span>
+            </section>
+
+            <section className="pd-v2-body">
+              <p className="pd-v2-category">{categoryLabel}</p>
+              <h1 className="pd-v2-title">{displayName}</h1>
+
+              <div className="pd-v2-price-row">
+                <p className="pd-v2-price">
+                  <strong>{formatInr(displayRate)}</strong>
+                  <span> / {unitSingular}</span>
+                </p>
+                <span className="pd-v2-moq">MOQ {minOrder}</span>
+              </div>
+
+              {detailError ? (
+                <p className="pd-v2-stock warn">{detailError}</p>
+              ) : (
+                <p className="pd-v2-stock">{stockLine}</p>
+              )}
+
+              {aboutText ? (
+                <section className="pd-v2-section">
+                  <h2 className="pd-v2-section-label">About this product</h2>
+                  <p className="pd-v2-about">{aboutText}</p>
+                </section>
               ) : null}
-            </div>
-          </section>
 
-          <section className="product-heading">
-            <h2>{displayName}</h2>
-            <div className="unit-price">
-              <strong>{formatInr(displayRate)}</strong>
-              <span> / {unitLabel}</span>
-            </div>
-            <p className="stock">
-              {detailError ? detailError : stockLine}
-            </p>
-          </section>
+              <section className="pd-v2-section">
+                <h2 className="pd-v2-section-label">Choose quantity</h2>
+                <div className="pd-v2-qty-grid" role="group" aria-label="Quantity">
+                  {presets.map((n) => {
+                    const active = quantity === n
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        className={active ? 'pd-v2-qty-chip active' : 'pd-v2-qty-chip'}
+                        disabled={stockInsufficientForMin}
+                        onClick={() => selectPreset(n)}
+                        aria-pressed={active}
+                      >
+                        <span className="pd-v2-qty-num">{n}</span>
+                        <span className="pd-v2-qty-unit">{unitSingular}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                {stockInsufficientForMin ? (
+                  <p className="stock-cap-warning" role="alert">
+                    Available stock ({stockCap} {unitLabel}) is below the minimum order. This item cannot be ordered
+                    right now.
+                  </p>
+                ) : stockCap != null ? (
+                  <p className="pd-v2-stock-hint">You can order up to {stockCap} {unitLabel}.</p>
+                ) : null}
+              </section>
 
-          <section className="details-card">
-            <p className="label">Bulk Quantity ({unitLabel})</p>
-            <div className="quantity-row">
-              <div className="quantity-box">
-                <button
-                  type="button"
-                  className="counter-btn"
-                  disabled={stockInsufficientForMin || quantity <= minOrder}
-                  onClick={() => bumpQuantity(-1)}
-                >
-                  <span className="material-symbols-outlined">remove</span>
-                </button>
-                <span>{quantity}</span>
-                <button
-                  type="button"
-                  className="counter-btn"
-                  disabled={stockInsufficientForMin}
-                  onClick={() => bumpQuantity(1)}
-                >
-                  <span className="material-symbols-outlined">add</span>
-                </button>
-              </div>
-              <div className="total-wrap">
-                <small>Total Price</small>
-                <strong>{formatInr(total)}</strong>
-              </div>
-            </div>
-            <p className="min-order">
-              Min. order: {minOrder} {unitLabel}
-            </p>
-            {stockInsufficientForMin ? (
-              <p className="stock-cap-warning" role="alert">
-                Available stock ({stockCap} {unitLabel}) is below the minimum order. This item cannot be ordered
-                right now.
-              </p>
-            ) : stockCap != null ? (
-              <p className="stock-cap-hint">You can order up to {stockCap} {unitLabel} (available stock).</p>
-            ) : null}
-          </section>
-
-          <section className="details-card">
-            <h3>Specifications</h3>
-            {specRows.length === 0 ? (
-              <p className="product-detail-placeholder">No specifications listed for this item.</p>
-            ) : (
-              <div className="spec-grid">
-                {specRows.map((row, index) => (
-                  <div key={`${index}-${row.label}`}>
-                    <small>{row.label}</small>
-                    <p className={row.label === 'Description' ? 'spec-value-multiline' : undefined}>{row.value}</p>
+              {specRows.length > 0 ? (
+                <section className="pd-v2-section">
+                  <h2 className="pd-v2-section-label">Specifications</h2>
+                  <div className="pd-v2-specs">
+                    {specRows.map((row, index) => (
+                      <div key={`${index}-${row.label}`} className="pd-v2-spec-row">
+                        <small>{row.label}</small>
+                        <p className={row.label === 'Description' ? 'spec-value-multiline' : undefined}>{row.value}</p>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-          </section>
+                </section>
+              ) : null}
 
-          <section className="product-actions" aria-label="Purchase">
+              <button
+                type="button"
+                className="pd-v2-buy-now"
+                disabled={stockInsufficientForMin}
+                onClick={() => onBuyNow(productForCart, quantity)}
+              >
+                Buy now
+              </button>
+            </section>
+          </main>
+
+          <footer className="pd-v2-footer">
+            <div className="pd-v2-line-total">
+              <div>
+                <span className="pd-v2-line-label">Line total</span>
+                <small>
+                  {quantity} × {formatInr(displayRate)}
+                </small>
+              </div>
+              <strong>{formatInr(total)}</strong>
+            </div>
             <button
               type="button"
-              className="btn btn-outline"
+              className="pd-v2-add-btn"
               disabled={stockInsufficientForMin}
               onClick={() => onAddToCart(productForCart, quantity)}
             >
-              <span className="material-symbols-outlined">add_shopping_cart</span>
-              Add to Cart
+              <span className="material-symbols-outlined">shopping_bag</span>
+              Add {quantity} to cart • {formatInr(total)}
             </button>
-            <button
-              type="button"
-              className="btn btn-accent"
-              disabled={stockInsufficientForMin}
-              onClick={() => onBuyNow(productForCart, quantity)}
-            >
-              <span className="material-symbols-outlined">bolt</span>
-              Buy Now
-            </button>
-          </section>
-        </main>
+          </footer>
+        </>
       )}
-    </>
+    </div>
   )
 }

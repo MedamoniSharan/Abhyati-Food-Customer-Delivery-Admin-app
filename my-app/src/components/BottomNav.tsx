@@ -7,6 +7,8 @@ type Props = {
 }
 
 export function BottomNav({ screen, cartCount, onChange }: Props) {
+  if (screen === 'product') return null
+
   return (
     <nav className="bottom-nav">
       <button
