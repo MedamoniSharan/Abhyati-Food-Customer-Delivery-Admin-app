@@ -66,7 +66,13 @@ import {
   withItemProductCategoryVirtual
 } from '../services/productCategoryZohoService.js'
 import { invalidateItemCategoryIndex } from '../services/itemCategoryIndexCache.js'
-import { createAssignment, getAssignmentById, listAssignments, mirrorAssignmentNow } from '../services/deliveryAssignmentStore.js'
+import {
+  createAssignment,
+  getAssignmentById,
+  listAssignments,
+  listAssignmentsMerged,
+  mirrorAssignmentNow
+} from '../services/deliveryAssignmentStore.js'
 import { clearDriverAssignmentZohoCache } from '../services/deliveryAssignmentResolve.js'
 import {
   notifyCustomerDriverAssigned,
@@ -76,7 +82,7 @@ import {
 } from '../services/notificationService.js'
 import { upsertInvoiceAssignmentNote } from '../services/zohoDeliveryAssignmentNotes.js'
 import { pricingTiersArraySchema } from '../services/customerPricingMath.js'
-import { paymentsByInvoiceIdMap, listPaymentRecords } from '../services/paymentRecordStore.js'
+import { paymentsByInvoiceIdMap, listPaymentRecordsMerged } from '../services/paymentRecordStore.js'
 import {
   addPricingTier,
   deletePricingTier,
@@ -1083,15 +1089,23 @@ adminRoutes.get('/invoices', async (req, res, next) => {
   }
 })
 
-adminRoutes.get('/delivery-assignments', (_req, res) => {
-  res.json({ assignments: listAssignments() })
+adminRoutes.get('/delivery-assignments', async (_req, res, next) => {
+  try {
+    res.json({ assignments: await listAssignmentsMerged() })
+  } catch (error) {
+    next(error)
+  }
 })
 
-adminRoutes.get('/payments', (_req, res) => {
-  const payments = listPaymentRecords().sort((a, b) =>
-    String(b.createdAt || b.paidAt || '').localeCompare(String(a.createdAt || a.paidAt || ''))
-  )
-  res.json({ payments })
+adminRoutes.get('/payments', async (_req, res, next) => {
+  try {
+    const payments = (await listPaymentRecordsMerged()).sort((a, b) =>
+      String(b.createdAt || b.paidAt || '').localeCompare(String(a.createdAt || a.paidAt || ''))
+    )
+    res.json({ payments })
+  } catch (error) {
+    next(error)
+  }
 })
 
 async function loadAssignmentForProof(id) {

@@ -133,8 +133,9 @@ export function DeliveryDriverApp({ user, onLogout, onNotify, onSessionUpdate }:
       onNotify('Delivery accepted — opening map')
       const target = refreshed.find((s) => s.id === stopId) || fallback
       openRouteMap(target?.mapsQuery || fallback?.mapsQuery, target?.mapsLink || fallback?.mapsLink)
-    } catch {
-      onNotify('Could not accept delivery')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not accept delivery'
+      onNotify(msg)
     } finally {
       setAcceptingId(null)
     }

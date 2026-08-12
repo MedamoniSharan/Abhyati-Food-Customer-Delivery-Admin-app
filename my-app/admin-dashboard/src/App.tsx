@@ -540,7 +540,7 @@ export default function App() {
     setAssignmentsRefreshing(true)
     try {
       const data = await adminFetch<{ assignments?: DeliveryAssignmentRow[] }>('/api/admin/delivery-assignments')
-      setAssignmentsRaw(Array.isArray(data.assignments) ? data.assignments : [])
+      if (Array.isArray(data.assignments)) setAssignmentsRaw(data.assignments)
     } finally {
       setAssignmentsRefreshing(false)
     }
@@ -550,7 +550,7 @@ export default function App() {
     setPaymentsRefreshing(true)
     try {
       const data = await adminFetch<{ payments?: PaymentRecordRow[] }>('/api/admin/payments')
-      setPaymentsRaw(Array.isArray(data.payments) ? data.payments : [])
+      if (Array.isArray(data.payments)) setPaymentsRaw(data.payments)
     } finally {
       setPaymentsRefreshing(false)
     }
@@ -2055,6 +2055,11 @@ export default function App() {
                   Refresh invoices
                 </button>
               </div>
+              <p style={{ margin: '0 0 12px', fontSize: '0.88rem', color: 'var(--admin-muted)' }}>
+                Mobile app checkout creates Zoho <strong>invoices</strong> (shown below), not sales orders. Use the
+                invoices table to assign drivers; sales orders below are admin-created only.
+              </p>
+              <h3 style={{ margin: '0 0 8px' }}>App orders (invoices)</h3>
               <div className="admin-table-wrap admin-busy-host">
                 {invoicesLoading ? <AdminBusyOverlay label="Loading invoices…" /> : null}
                 <table className="admin-table">

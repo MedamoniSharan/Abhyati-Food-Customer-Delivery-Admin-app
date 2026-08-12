@@ -135,6 +135,18 @@ function mapAssignmentToStop(a: DeliveryAssignment, rowIdx: number): DeliverySto
   }
 }
 
+async function parseApiErrorMessage(response: Response): Promise<string> {
+  try {
+    const text = await response.text()
+    if (!text.trim()) return `Request failed (${response.status})`
+    const data = JSON.parse(text) as { message?: string }
+    if (typeof data.message === 'string' && data.message.trim()) return data.message.trim()
+    return `Request failed (${response.status})`
+  } catch {
+    return `Request failed (${response.status})`
+  }
+}
+
 async function request<T>(path: string): Promise<T> {
   logApiCandidatesOnce(API_BASE_URL_CANDIDATES)
   let lastError: unknown = null
@@ -151,7 +163,7 @@ async function request<T>(path: string): Promise<T> {
         throw new Error('Session expired. Please sign in again.')
       }
       if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`)
+        throw new Error(await parseApiErrorMessage(response))
       }
       return response.json() as Promise<T>
     } catch (error) {
@@ -182,7 +194,7 @@ async function requestWithInit<T>(path: string, init?: RequestInit): Promise<T> 
         throw new Error('Session expired. Please sign in again.')
       }
       if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`)
+        throw new Error(await parseApiErrorMessage(response))
       }
       return response.json() as Promise<T>
     } catch (error) {

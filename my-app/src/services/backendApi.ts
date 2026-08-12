@@ -119,6 +119,12 @@ function mapZohoSalesOrderToOrder(order: ZohoSalesOrder, index: number): Order {
   }
 }
 
+/** Map order payload from POST checkout or Razorpay verify (backend mapInvoiceToOrder shape). */
+export function mapBackendOrderResponse(raw: unknown, index = 0): Order | null {
+  if (!raw || typeof raw !== 'object') return null
+  return mapZohoSalesOrderToOrder(raw as ZohoSalesOrder, index)
+}
+
 type RequestOptions = {
   method?: string
   body?: BodyInit | null

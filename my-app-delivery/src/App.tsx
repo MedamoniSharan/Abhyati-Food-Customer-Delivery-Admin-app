@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { NotificationsProvider } from './contexts/NotificationsContext'
 import { useToast } from './contexts/ToastContext'
 import { DeliveryDriverApp } from './screens/delivery/DeliveryDriverApp'
@@ -124,19 +124,35 @@ function App() {
 
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null)
 
+  const runHealthCheck = useCallback(async () => {
+    const ok = await checkBackendReachable()
+    setBackendReachable(ok)
+    return ok
+  }, [])
+
   useEffect(() => {
     document.body.dataset.toastLayout = isAuthenticated ? 'main' : 'auth'
   }, [isAuthenticated])
 
   useEffect(() => {
-    let cancelled = false
-    void checkBackendReachable().then((ok) => {
-      if (!cancelled) setBackendReachable(ok)
-    })
-    return () => {
-      cancelled = true
+    void runHealthCheck()
+  }, [runHealthCheck])
+
+  useEffect(() => {
+    const onFocus = () => {
+      void runHealthCheck()
     }
-  }, [])
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [runHealthCheck])
+
+  useEffect(() => {
+    if (backendReachable !== false) return
+    const id = window.setInterval(() => {
+      void runHealthCheck()
+    }, 60_000)
+    return () => window.clearInterval(id)
+  }, [backendReachable, runHealthCheck])
 
   return (
     <div className="app-shell">
@@ -152,6 +168,7 @@ function App() {
             signedInRef.current = true
             setSessionUser(user)
             setIsAuthenticated(true)
+            void runHealthCheck()
             showToast(message, { variant: 'success' })
           }}
         />

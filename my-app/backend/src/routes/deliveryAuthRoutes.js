@@ -9,10 +9,9 @@ import {
   updateDriverRecord
 } from '../services/driverStore.js'
 import {
-  getAssignmentById,
   updateAssignment
 } from '../services/deliveryAssignmentStore.js'
-import { resolveAssignmentsForDriver } from '../services/deliveryAssignmentResolve.js'
+import { resolveAssignmentById, resolveAssignmentsForDriver } from '../services/deliveryAssignmentResolve.js'
 import {
   hydrateAssignmentFromInvoice,
   hydrateAssignmentsFromInvoices
@@ -97,11 +96,7 @@ deliveryAuthRoutes.get('/assignments', async (req, res, next) => {
 deliveryAuthRoutes.get('/assignments/:id', async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
-    let row = getAssignmentById(id)
-    if (!row) {
-      const all = await resolveAssignmentsForDriver(req.driver.email)
-      row = all.find((a) => String(a.id) === id) || null
-    }
+    const row = await resolveAssignmentById(id, req.driver.email)
     if (!row) {
       const err = new Error('Assignment not found')
       err.statusCode = 404
@@ -175,7 +170,7 @@ deliveryAuthRoutes.patch('/profile', async (req, res, next) => {
 deliveryAuthRoutes.post('/assignments/:id/accept', async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
-    const row = getAssignmentById(id)
+    const row = await resolveAssignmentById(id, req.driver.email)
     if (!row) {
       const err = new Error('Assignment not found')
       err.statusCode = 404
@@ -221,7 +216,7 @@ deliveryAuthRoutes.post('/assignments/:id/accept', async (req, res, next) => {
 deliveryAuthRoutes.patch('/assignments/:id/status', async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
-    const row = getAssignmentById(id)
+    const row = await resolveAssignmentById(id, req.driver.email)
     if (!row) {
       const err = new Error('Assignment not found')
       err.statusCode = 404
@@ -263,7 +258,7 @@ const proofUpload = upload.fields([
 deliveryAuthRoutes.post('/assignments/:id/proof', proofUpload, async (req, res, next) => {
   try {
     const id = z.string().min(1).parse(req.params.id)
-    const row = getAssignmentById(id)
+    const row = await resolveAssignmentById(id, req.driver.email)
     if (!row) {
       const err = new Error('Assignment not found')
       err.statusCode = 404

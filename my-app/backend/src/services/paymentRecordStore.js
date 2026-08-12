@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createLogger, serializeError } from '../util/logger.js'
-import { putPaymentRecord } from './dynamo/appDataDynamo.js'
+import { listAppRecords, putPaymentRecord } from './dynamo/appDataDynamo.js'
 
 const log = createLogger('payments')
 
@@ -51,6 +51,62 @@ load()
 export function listPaymentRecords() {
   reloadFromDisk()
   return [...records.values()]
+}
+
+function paymentFreshness(row) {
+  if (!row) return ''
+  const paid = row.paidAt || ''
+  const updated = row.updatedAt || row.createdAt || ''
+  return `${paid}|${updated}`
+}
+
+function preferPaymentRow(a, b) {
+  if (!a) return b
+  if (!b) return a
+  return paymentFreshness(a) >= paymentFreshness(b) ? a : b
+}
+
+function upsertPaymentRow(row) {
+  if (!row?.id) return null
+  reloadFromDisk()
+  const id = String(row.id)
+  const existing = records.get(id)
+  const next = existing
+    ? { ...existing, ...row, updatedAt: String(row.updatedAt || new Date().toISOString()) }
+    : { ...row, id }
+  records.set(id, next)
+  persist(next)
+  return next
+}
+
+/**
+ * Local JSON can lag multi-instance / crash mid-write. Merge Dynamo payloads so
+ * admin payments survive Render redeploys and cross-instance reads.
+ */
+export async function listPaymentRecordsMerged() {
+  const local = listPaymentRecords()
+  let remote = []
+  try {
+    const rows = await listAppRecords('payment')
+    if (Array.isArray(rows)) remote = rows.filter((r) => r?.id)
+  } catch (err) {
+    log.warn('Dynamo payment list failed', serializeError(err))
+  }
+
+  const byId = new Map()
+  for (const row of [...local, ...remote]) {
+    const id = String(row.id)
+    byId.set(id, preferPaymentRow(byId.get(id), row))
+  }
+
+  for (const row of byId.values()) {
+    const localRow = local.find((r) => String(r.id) === String(row.id))
+    if (!localRow || paymentFreshness(row) > paymentFreshness(localRow)) {
+      upsertPaymentRow(row)
+    }
+  }
+
+  return [...byId.values()]
 }
 
 export function getPaymentRecordById(id) {

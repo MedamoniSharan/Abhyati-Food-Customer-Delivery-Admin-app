@@ -62,7 +62,28 @@ export async function adminLogin(email: string, password: string): Promise<strin
   return data.token
 }
 
-export async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+function isNetworkFetchError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const msg = err.message.toLowerCase()
+  return (
+    err.name === 'TypeError' ||
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('load failed') ||
+    msg.includes('network request failed') ||
+    msg.includes('cannot reach api server')
+  )
+}
+
+function networkErrorMessage(): string {
+  return 'Cannot reach API server. Check your connection or wait for the server to wake up, then try again.'
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function adminFetchOnce<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getAdminToken()
   if (!token) {
     throw new Error('Not signed in')
@@ -72,7 +93,17 @@ export async function adminFetch<T>(path: string, init: RequestInit = {}): Promi
   if (!headers.has('Content-Type') && init.body && typeof init.body === 'string') {
     headers.set('Content-Type', 'application/json')
   }
-  const res = await fetch(apiUrl(path), { ...init, headers })
+  let res: Response
+  try {
+    res = await fetch(apiUrl(path), { ...init, headers })
+  } catch (err) {
+    if (isNetworkFetchError(err)) {
+      const netErr = new Error(networkErrorMessage())
+      netErr.cause = err
+      throw netErr
+    }
+    throw err
+  }
   const text = await res.text()
   if (res.status === 401) {
     setAdminToken(null)
@@ -112,6 +143,18 @@ export async function adminFetch<T>(path: string, init: RequestInit = {}): Promi
     throw new Error(msg)
   }
   return data as T
+}
+
+export async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = String(init.method || 'GET').toUpperCase()
+  const canRetry = method === 'GET' || method === 'HEAD'
+  try {
+    return await adminFetchOnce<T>(path, init)
+  } catch (err) {
+    if (!canRetry || !isNetworkFetchError(err)) throw err
+    await sleep(2000)
+    return adminFetchOnce<T>(path, init)
+  }
 }
 
 /** POST multipart to `/api/admin/items/:id/image` (field name: `image`). */

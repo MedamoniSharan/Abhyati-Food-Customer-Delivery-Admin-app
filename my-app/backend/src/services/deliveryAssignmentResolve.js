@@ -1,8 +1,9 @@
 import {
+  getAssignmentById,
   listAssignmentsForDriver,
   upsertAssignmentRow
 } from './deliveryAssignmentStore.js'
-import { listAssignmentsByDriver } from './dynamo/appDataDynamo.js'
+import { getAppRecord, listAssignmentsByDriver } from './dynamo/appDataDynamo.js'
 import { listAssignmentsFromZohoForDriver } from './zohoDeliveryAssignmentNotes.js'
 import { createLogger, serializeError } from '../util/logger.js'
 
@@ -86,4 +87,38 @@ export async function resolveAssignmentsForDriver(driverEmail) {
   return fromZoho
     .slice()
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+}
+
+/**
+ * Resolve a single assignment by id — local JSON, Dynamo, then driver list (Zoho hydrate).
+ * Keeps accept/status/proof working on multi-instance Render where list hydrated from Dynamo.
+ */
+export async function resolveAssignmentById(id, driverEmail) {
+  const key = String(id || '').trim()
+  if (!key) return null
+
+  let row = getAssignmentById(key)
+  if (row) return row
+
+  try {
+    const fromDynamo = await getAppRecord('assignment', key)
+    if (fromDynamo?.id) {
+      upsertAssignmentRow(fromDynamo, { allowReplace: true })
+      return fromDynamo
+    }
+  } catch (err) {
+    log.warn('Dynamo assignment get failed', serializeError(err))
+  }
+
+  const email = normalizeEmail(driverEmail)
+  if (email) {
+    const all = await resolveAssignmentsForDriver(email)
+    row = all.find((a) => String(a.id) === key) || null
+    if (row) {
+      upsertAssignmentRow(row, { allowReplace: true })
+      return row
+    }
+  }
+
+  return null
 }

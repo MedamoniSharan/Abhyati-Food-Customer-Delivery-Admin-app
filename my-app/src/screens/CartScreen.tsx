@@ -49,44 +49,44 @@ export function CartScreen({
 
         {cartItems.map((item) => {
           const minQty = item.product.minPurchaseCount ?? 1
+          const atMinQty = item.quantity <= minQty
           return (
           <article key={item.product.id} className="order-card">
-            <div className="order-main">
+            <div className="order-main cart-line-header">
               <ProductImage product={item.product} />
               <div className="order-body">
-                <h3>{item.product.name}</h3>
+                <div className="cart-line-title-row">
+                  <h3>{item.product.name}</h3>
+                  <button
+                    type="button"
+                    className="cart-delete-icon-btn"
+                    aria-label={`Remove ${item.product.name}`}
+                    onClick={() => onRemove(item.product.id)}
+                  >
+                    <span className="material-symbols-outlined">delete</span>
+                  </button>
+                </div>
                 <p>{item.product.subtitle}</p>
                 <strong>{formatInr(item.product.priceInr * item.quantity)}</strong>
                 {minQty > 1 ? <p className="cart-line-moq">Min. order: {minQty}{item.product.unit ? ` ${item.product.unit}` : ''}</p> : null}
+                <div className="qty-inline cart-line-qty">
+                  <button
+                    type="button"
+                    className="counter-btn"
+                    aria-label={atMinQty ? 'Remove from cart' : 'Decrease quantity'}
+                    onClick={() => onDecrease(item.product.id)}
+                  >
+                    <span className="material-symbols-outlined">{atMinQty ? 'delete' : 'remove'}</span>
+                  </button>
+                  <strong>
+                    {item.quantity}
+                    {item.product.unit ? ` ${item.product.unit}` : ''}
+                  </strong>
+                  <button type="button" className="counter-btn" aria-label="Increase quantity" onClick={() => onIncrease(item.product.id)}>
+                    <span className="material-symbols-outlined">add</span>
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="cart-line-actions">
-              <div className="qty-inline">
-                <button
-                  type="button"
-                  className="counter-btn"
-                  aria-label={item.quantity <= minQty ? 'Remove from cart' : 'Decrease quantity'}
-                  onClick={() => onDecrease(item.product.id)}
-                >
-                  <span className="material-symbols-outlined">remove</span>
-                </button>
-                <strong>
-                  {item.quantity}
-                  {item.product.unit ? ` ${item.product.unit}` : ''}
-                </strong>
-                <button type="button" className="counter-btn" aria-label="Increase quantity" onClick={() => onIncrease(item.product.id)}>
-                  <span className="material-symbols-outlined">add</span>
-                </button>
-              </div>
-              <button
-                type="button"
-                className="cart-remove-btn"
-                aria-label={`Remove ${item.product.name}`}
-                onClick={() => onRemove(item.product.id)}
-              >
-                <span className="material-symbols-outlined">delete</span>
-                Remove
-              </button>
             </div>
           </article>
           )

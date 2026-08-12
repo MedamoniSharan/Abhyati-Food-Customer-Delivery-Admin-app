@@ -12,7 +12,7 @@ import { OrderDetailsScreen } from './screens/OrderDetailsScreen'
 import { OrdersScreen } from './screens/OrdersScreen'
 import { ProductDetailsScreen } from './screens/ProductDetailsScreen'
 import type { CartItem, Order, Product, Screen } from './types/app'
-import { createCustomerOrder, downloadOrderProof, fetchCustomerProductCategories, fetchZohoItemsPage, getBackendOrders } from './services/backendApi'
+import { createCustomerOrder, downloadOrderProof, fetchCustomerProductCategories, fetchZohoItemsPage, getBackendOrders, mapBackendOrderResponse } from './services/backendApi'
 import { createRazorpayOrder, verifyRazorpayPayment } from './services/paymentApi'
 import { openRazorpayCheckout } from './utils/razorpayCheckout'
 import { fetchAuthMe } from './services/authApi'
@@ -133,6 +133,15 @@ function App() {
     setOrderHistory(orders)
     setOrdersLoadError(error)
   }, [])
+
+  function prependPlacedOrder(order: Order | null) {
+    if (!order?.id) return
+    setOrderHistory((prev) => {
+      const rest = prev.filter((o) => o.id !== order.id)
+      return [order, ...rest]
+    })
+    setOrdersLoadError(null)
+  }
 
   const handlePullRefresh = useCallback(async () => {
     const token = readAuthToken()
@@ -502,8 +511,9 @@ function App() {
     setCheckoutBusy(true)
     try {
       if (mode === 'pay_later') {
-        await createCustomerOrder(lineItems, { referenceNumber })
+        const placed = await createCustomerOrder(lineItems, { referenceNumber })
         setCartItems([])
+        prependPlacedOrder(placed)
         await refreshOrderHistory()
         setScreen('orders')
         showToast('Order placed successfully and synced to admin.', { variant: 'success' })
@@ -519,12 +529,13 @@ function App() {
         user: freshUser
       })
       try {
-        await verifyRazorpayPayment({
+        const verifyResult = await verifyRazorpayPayment({
           razorpay_order_id: paymentResult.razorpay_order_id,
           razorpay_payment_id: paymentResult.razorpay_payment_id,
           razorpay_signature: paymentResult.razorpay_signature
         })
         setCartItems([])
+        prependPlacedOrder(mapBackendOrderResponse(verifyResult.order))
         await refreshOrderHistory()
         setScreen('orders')
         showToast('Payment successful. Order placed and synced to admin.', { variant: 'success' })
