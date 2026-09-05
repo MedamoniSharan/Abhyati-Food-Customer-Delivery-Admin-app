@@ -17,7 +17,7 @@ type Props = {
 
 type AuthView = 'welcome' | 'login' | 'signup'
 
-const OTP_RESEND_SECONDS = 30
+const OTP_RESEND_SECONDS = 10
 
 function PasswordField({
   value,
