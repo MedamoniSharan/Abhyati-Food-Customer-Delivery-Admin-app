@@ -16,7 +16,8 @@ import {
   isMsg91Configured,
   resendOtp,
   sendOtp,
-  verifyOtp
+  verifyOtp,
+  verifyWidgetAccessToken
 } from '../services/msg91OtpService.js'
 import { appendAuditEvent, maskEmail } from '../services/adminAuditService.js'
 
@@ -48,17 +49,32 @@ const otpSendSchema = z.object({
   mobile: mobileSchema
 })
 
+const otpResendSchema = z.object({
+  mobile: mobileSchema,
+  /** MSG91 Widget reqId from /otp/send (required for widget retry) */
+  requestId: z.string().trim().min(8).optional()
+})
+
 const signupSchema = z.object({
   fullName: z.string().trim().min(2, 'Full name is required'),
   email: z.string().email('Valid email is required'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   mobile: mobileSchema,
+  /** Classic SendOTP code OR Widget OTP digits (with requestId) */
   otp: z
     .string()
     .trim()
-    .regex(/^\d{4,9}$/, 'Enter the OTP sent to your mobile'),
+    .regex(/^\d{4,9}$/, 'Enter the OTP sent to your mobile')
+    .optional(),
+  /** MSG91 Widget request id from /otp/send — needed when verifying otp via widget */
+  requestId: z.string().trim().min(8).optional(),
+  /** MSG91 OTP Widget JWT after client-side verifyOtp (legacy client path) */
+  accessToken: z.string().trim().min(10, 'Phone verification is incomplete').optional(),
   deliveryAddress: z.string().max(2000).optional(),
   mapsLink: mapsLinkField
+}).refine((v) => Boolean(v.accessToken) || Boolean(v.otp), {
+  message: 'Enter the OTP sent to your mobile',
+  path: ['otp']
 })
 
 const profilePatchSchema = z.object({
@@ -124,8 +140,8 @@ authRoutes.post('/otp/resend', async (req, res, next) => {
       err.statusCode = 503
       throw err
     }
-    const { mobile } = otpSendSchema.parse(req.body)
-    const result = await resendOtp(mobile)
+    const { mobile, requestId } = otpResendSchema.parse(req.body)
+    const result = await resendOtp(mobile, { requestId })
     const normalized = result?.mobile || normalizeIndiaMobile(mobile)
     appendAuditEvent({
       action: 'otp.resend',
@@ -165,17 +181,30 @@ authRoutes.post('/signup', async (req, res, next) => {
       req,
       meta: { email: input.email, mobile: input.mobile }
     })
-    await verifyOtp(input.mobile, input.otp)
-    appendAuditEvent({
-      action: 'otp.verify',
-      outcome: 'ok',
-      stage: 'otp_verified',
-      actor: maskEmail(input.email),
-      actorType: 'anonymous',
-      req,
-      meta: { mobile: input.mobile }
-    })
-    const { otp: _otp, ...rest } = input
+    if (input.accessToken) {
+      await verifyWidgetAccessToken(input.accessToken, input.mobile)
+      appendAuditEvent({
+        action: 'otp.verify',
+        outcome: 'ok',
+        stage: 'otp_widget_token_verified',
+        actor: maskEmail(input.email),
+        actorType: 'anonymous',
+        req,
+        meta: { mobile: input.mobile, via: 'widget' }
+      })
+    } else {
+      await verifyOtp(input.mobile, input.otp, { requestId: input.requestId })
+      appendAuditEvent({
+        action: 'otp.verify',
+        outcome: 'ok',
+        stage: 'otp_verified',
+        actor: maskEmail(input.email),
+        actorType: 'anonymous',
+        req,
+        meta: { mobile: input.mobile, via: input.requestId ? 'widget' : 'sendotp' }
+      })
+    }
+    const { otp: _otp, accessToken: _accessToken, requestId: _requestId, ...rest } = input
     const signupInput = {
       ...rest,
       mobile: normalizeIndiaMobile(input.mobile) || rest.mobile

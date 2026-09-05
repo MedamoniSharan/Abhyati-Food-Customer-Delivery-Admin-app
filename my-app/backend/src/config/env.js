@@ -83,6 +83,9 @@ const envSchema = z.object({
   MSG91_AUTH_KEY: z.string().optional(),
   MSG91_TEMPLATE_ID: z.string().optional(),
   MSG91_OTP_LENGTH: z.coerce.number().int().min(4).max(9).default(6),
+  /** MSG91 OTP Widget (preferred). Server calls widget APIs so browser IPs are not blocked. */
+  MSG91_WIDGET_ID: z.string().optional(),
+  MSG91_WIDGET_AUTH_TOKEN: z.string().optional(),
 
   /** AWS DynamoDB (optional until configured — without table name, Zoho-only behavior remains) */
   AWS_REGION: z.string().default('ap-south-1'),

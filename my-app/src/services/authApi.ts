@@ -164,7 +164,12 @@ export type SignupPayload = {
   email: string
   password: string
   mobile: string
-  otp: string
+  /** OTP digits — verified on the server (Widget or classic SendOTP). */
+  otp?: string
+  /** MSG91 Widget request id from /otp/send */
+  requestId?: string
+  /** Legacy: MSG91 Widget JWT after client-side verifyOtp */
+  accessToken?: string
   deliveryAddress?: string
   mapsLink?: string
 }
@@ -181,9 +186,12 @@ export async function sendSignupOtp(
 }
 
 export async function resendSignupOtp(
-  mobile: string
+  mobile: string,
+  requestId?: string
 ): Promise<{ message: string; requestId?: string; correlationId?: string }> {
-  const result = await authRequest('/api/auth/otp/resend', { mobile: mobile.trim() }, { expectUser: false })
+  const body: Record<string, string> = { mobile: mobile.trim() }
+  if (requestId?.trim()) body.requestId = requestId.trim()
+  const result = await authRequest('/api/auth/otp/resend', body, { expectUser: false })
   return {
     message: result.message,
     requestId: result.requestId,
@@ -196,9 +204,14 @@ export async function signupCustomer(payload: SignupPayload): Promise<LoginRespo
     fullName: payload.fullName.trim(),
     email: payload.email.trim(),
     password: payload.password,
-    mobile: payload.mobile.trim(),
-    otp: payload.otp.trim()
+    mobile: payload.mobile.trim()
   }
+  const otp = payload.otp?.trim()
+  if (otp) body.otp = otp
+  const requestId = payload.requestId?.trim()
+  if (requestId) body.requestId = requestId
+  const accessToken = payload.accessToken?.trim()
+  if (accessToken) body.accessToken = accessToken
   const deliveryAddress = payload.deliveryAddress?.trim()
   if (deliveryAddress) body.deliveryAddress = deliveryAddress
   const mapsLink = payload.mapsLink?.trim()

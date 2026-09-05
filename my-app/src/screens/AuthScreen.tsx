@@ -70,6 +70,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
   const [otp, setOtp] = useState('')
   const [otpError, setOtpError] = useState('')
   const [otpSent, setOtpSent] = useState(false)
+  const [otpReqId, setOtpReqId] = useState('')
   const [resendIn, setResendIn] = useState(0)
   const [deliveryAddress, setDeliveryAddress] = useState('')
   const [mapsLink, setMapsLink] = useState('')
@@ -90,6 +91,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
     setOtp('')
     setOtpError('')
     setOtpSent(false)
+    setOtpReqId('')
     setResendIn(0)
   }
 
@@ -99,6 +101,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
     setOtp('')
     setOtpError('')
     setOtpSent(false)
+    setOtpReqId('')
     setResendIn(0)
   }
 
@@ -180,16 +183,15 @@ export function AuthScreen({ onAuthenticated }: Props) {
       showToast('Enter a 10-digit mobile number (without +91)', { variant: 'error' })
       return
     }
-    // Still require core signup fields so OTP is not wasted on incomplete forms
     if (!validateSignupFields()) return
     setOtpLoading(true)
     setOtpError('')
     try {
       const result = await sendSignupOtp(mob)
+      setOtpReqId(result.requestId || '')
       setOtpSent(true)
       setResendIn(OTP_RESEND_SECONDS)
-      const idHint = result.requestId ? ` (id ${result.requestId.slice(0, 10)}…)` : ''
-      showToast(`OTP sent to your mobile${idHint}`, { variant: 'success' })
+      showToast('OTP sent to your mobile', { variant: 'success' })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to send OTP'
       showToast(message, { variant: 'error' })
@@ -200,13 +202,15 @@ export function AuthScreen({ onAuthenticated }: Props) {
 
   async function handleResendOtp() {
     if (resendIn > 0) return
-    if (!looksLikeIndiaMobile(mobile.trim())) {
+    const mob = mobile.trim()
+    if (!looksLikeIndiaMobile(mob)) {
       showToast('Enter a 10-digit mobile number (without +91)', { variant: 'error' })
       return
     }
     setOtpLoading(true)
     try {
-      await resendSignupOtp(mobile.trim())
+      const result = await resendSignupOtp(mob, otpReqId || undefined)
+      if (result.requestId) setOtpReqId(result.requestId)
       setResendIn(OTP_RESEND_SECONDS)
       showToast('OTP resent', { variant: 'success' })
     } catch (err) {
@@ -225,12 +229,9 @@ export function AuthScreen({ onAuthenticated }: Props) {
       return
     }
     const code = otp.trim()
-    if (!code) {
-      setOtpError('Enter the OTP sent to your mobile')
-      return
-    }
     if (!/^\d{4,9}$/.test(code)) {
-      setOtpError('Enter a valid OTP')
+      setOtpError('Enter the OTP sent to your mobile')
+      showToast('Enter the OTP sent to your mobile', { variant: 'error' })
       return
     }
     setOtpError('')
@@ -249,6 +250,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
         password,
         mobile: mob,
         otp: code,
+        ...(otpReqId ? { requestId: otpReqId } : {}),
         ...(addr ? { deliveryAddress: addr } : {}),
         ...(maps ? { mapsLink: maps } : {})
       })
@@ -332,6 +334,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
               setOtpSent(false)
               setOtp('')
               setOtpError('')
+              setOtpReqId('')
               setResendIn(0)
             }}
           />
