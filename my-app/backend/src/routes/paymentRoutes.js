@@ -23,6 +23,7 @@ import {
 } from '../services/razorpayService.js'
 import { recordInvoicePayment } from '../services/zohoPaymentService.js'
 import { createLogger, serializeError } from '../util/logger.js'
+import { appendAuditEvent } from '../services/adminAuditService.js'
 
 const log = createLogger('payment-routes')
 
@@ -87,6 +88,19 @@ paymentRoutes.post('/razorpay/order', async (req, res, next) => {
       amountInr: totalInr,
       lineItems: resolvedLines,
       referenceNumber: body.reference_number
+    })
+
+    appendAuditEvent({
+      action: 'payment.razorpay.order',
+      outcome: 'ok',
+      stage: 'created',
+      req,
+      meta: {
+        razorpayOrderId: razorpayOrder.id,
+        amountInr: totalInr,
+        customerId,
+        lineCount: resolvedLines.length
+      }
     })
 
     res.json({
@@ -206,6 +220,21 @@ paymentRoutes.post('/razorpay/verify', async (req, res, next) => {
     } catch {
       /* non-fatal */
     }
+
+    appendAuditEvent({
+      action: 'payment.razorpay.verify',
+      outcome: zohoPaymentError ? 'warn' : 'ok',
+      stage: zohoPaymentError ? 'paid_zoho_record_failed' : 'paid',
+      req,
+      meta: {
+        razorpayOrderId: body.razorpay_order_id,
+        razorpayPaymentId: body.razorpay_payment_id,
+        invoiceId,
+        invoiceNumber,
+        amountInr,
+        zohoPaymentError: zohoPaymentError?.message || null
+      }
+    })
 
     res.status(201).json({
       message: zohoPaymentError

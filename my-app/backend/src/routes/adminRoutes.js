@@ -4,7 +4,7 @@ import multer from 'multer'
 import { z } from 'zod'
 import { env } from '../config/env.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
-import { appendAdminAudit } from '../services/adminAuditService.js'
+import { appendAdminAudit, readRecentAuditEvents } from '../services/adminAuditService.js'
 import { countCustomerAppLoginsInZoho, createCustomerUser, setCustomerContactDisabled, updateCustomerUserByEmail } from '../services/authStore.js'
 import {
   createDriverRecord,
@@ -405,6 +405,19 @@ adminRoutes.post('/login', (req, res, next) => {
 })
 
 adminRoutes.use(requireAdmin)
+
+adminRoutes.get('/audit', (req, res) => {
+  const limit = Number(req.query.limit) || 100
+  const action = String(req.query.action || '').trim()
+  const outcome = String(req.query.outcome || '').trim()
+  const q = String(req.query.q || '').trim()
+  const result = readRecentAuditEvents({ limit, action, outcome, q })
+  res.json({
+    events: result.events,
+    totalMatched: result.totalMatched,
+    filters: { limit, action: action || undefined, outcome: outcome || undefined, q: q || undefined }
+  })
+})
 
 adminRoutes.get('/zoho-status', async (_req, res, next) => {
   try {

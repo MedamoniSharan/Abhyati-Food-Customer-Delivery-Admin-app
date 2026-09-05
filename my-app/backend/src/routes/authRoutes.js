@@ -11,13 +11,14 @@ import {
 import { signCustomerToken, verifyCustomerToken } from '../services/jwtService.js'
 import { getActiveTierForContact, isCustomerPricingConfigured } from '../services/customerPricingZohoService.js'
 import { isGoogleMapsUrl } from '../util/customerMapsLink.js'
-import { isValidIndiaMobile, normalizeIndiaMobile } from '../util/indiaMobile.js'
+import { isTenDigitIndiaMobileInput, normalizeIndiaMobile } from '../util/indiaMobile.js'
 import {
   isMsg91Configured,
   resendOtp,
   sendOtp,
   verifyOtp
 } from '../services/msg91OtpService.js'
+import { appendAuditEvent, maskEmail } from '../services/adminAuditService.js'
 
 const mapsLinkField = z
   .string()
@@ -32,13 +33,15 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Invalid password')
 })
 
+const TEN_DIGIT_MOBILE_MSG = 'Enter a 10-digit mobile number (without +91)'
+
+/** Signup / OTP: user must send plain 10 digits only (no +91 / 91 prefix). */
 const mobileSchema = z
   .string()
   .trim()
-  .min(8, 'Mobile number is required')
-  .max(50, 'Mobile number is too long')
-  .refine((v) => Boolean(normalizeIndiaMobile(v)), {
-    message: 'Enter a valid 10-digit Indian mobile number'
+  .min(1, 'Mobile number is required')
+  .refine((v) => isTenDigitIndiaMobileInput(v), {
+    message: TEN_DIGIT_MOBILE_MSG
   })
 
 const otpSendSchema = z.object({
@@ -63,10 +66,9 @@ const profilePatchSchema = z.object({
   mobile: z
     .string()
     .trim()
-    .max(50)
     .optional()
-    .refine((v) => v === undefined || v === '' || isValidIndiaMobile(v), {
-      message: 'Enter a valid 10-digit Indian mobile number'
+    .refine((v) => v === undefined || v === '' || isTenDigitIndiaMobileInput(v), {
+      message: TEN_DIGIT_MOBILE_MSG
     }),
   email: z.string().email().max(254).optional(),
   password: z.string().min(6).max(128).optional(),
@@ -92,6 +94,18 @@ authRoutes.post('/otp/send', async (req, res, next) => {
     }
     const { mobile } = otpSendSchema.parse(req.body)
     const result = await sendOtp(mobile)
+    appendAuditEvent({
+      action: 'otp.send',
+      outcome: 'ok',
+      stage: 'msg91_queued',
+      actorType: 'anonymous',
+      req,
+      meta: {
+        mobile: result.mobile,
+        msg91RequestId: result.requestId || null,
+        note: 'MSG91 accepted request — not proof of SMS delivery. Check MSG91 Logs with msg91RequestId.'
+      }
+    })
     res.json({
       message: 'OTP sent successfully',
       mobile: result.mobile,
@@ -111,8 +125,24 @@ authRoutes.post('/otp/resend', async (req, res, next) => {
       throw err
     }
     const { mobile } = otpSendSchema.parse(req.body)
-    await resendOtp(mobile)
-    res.json({ message: 'OTP resent successfully', mobile: normalizeIndiaMobile(mobile) })
+    const result = await resendOtp(mobile)
+    const normalized = result?.mobile || normalizeIndiaMobile(mobile)
+    appendAuditEvent({
+      action: 'otp.resend',
+      outcome: 'ok',
+      stage: 'msg91_queued',
+      actorType: 'anonymous',
+      req,
+      meta: {
+        mobile: normalized,
+        msg91RequestId: result?.requestId || null
+      }
+    })
+    res.json({
+      message: 'OTP resent successfully',
+      mobile: normalized,
+      requestId: result?.requestId || undefined
+    })
   } catch (error) {
     next(error)
   }
@@ -126,7 +156,25 @@ authRoutes.post('/signup', async (req, res, next) => {
       throw err
     }
     const input = signupSchema.parse(req.body)
+    appendAuditEvent({
+      action: 'customer.signup',
+      outcome: 'ok',
+      stage: 'otp_verify_start',
+      actor: maskEmail(input.email),
+      actorType: 'anonymous',
+      req,
+      meta: { email: input.email, mobile: input.mobile }
+    })
     await verifyOtp(input.mobile, input.otp)
+    appendAuditEvent({
+      action: 'otp.verify',
+      outcome: 'ok',
+      stage: 'otp_verified',
+      actor: maskEmail(input.email),
+      actorType: 'anonymous',
+      req,
+      meta: { mobile: input.mobile }
+    })
     const { otp: _otp, ...rest } = input
     const signupInput = {
       ...rest,
@@ -134,6 +182,19 @@ authRoutes.post('/signup', async (req, res, next) => {
     }
     const { user } = await signupCustomerUser(signupInput)
     const token = signCustomerToken(user.email)
+    appendAuditEvent({
+      action: 'customer.signup',
+      outcome: 'ok',
+      stage: 'account_created',
+      actor: maskEmail(user.email),
+      actorType: 'customer',
+      req,
+      meta: {
+        email: user.email,
+        mobile: user.mobile,
+        userId: user.id
+      }
+    })
     res.status(201).json({
       message: 'Account created successfully',
       user,
@@ -149,6 +210,15 @@ authRoutes.post('/login', async (req, res, next) => {
     const input = loginSchema.parse(req.body)
     const user = await loginCustomerUser(input)
     const token = signCustomerToken(user.email)
+    appendAuditEvent({
+      action: 'customer.login',
+      outcome: 'ok',
+      stage: 'session_issued',
+      actor: maskEmail(user.email),
+      actorType: 'customer',
+      req,
+      meta: { email: user.email, userId: user.id }
+    })
     res.json({
       message: 'Login successful',
       user,
@@ -226,6 +296,18 @@ authRoutes.patch('/profile', requireCustomer, requireActiveCustomer, async (req,
       err.statusCode = 404
       throw err
     }
+    appendAuditEvent({
+      action: 'customer.profile.update',
+      outcome: 'ok',
+      stage: 'saved',
+      actor: maskEmail(user.email),
+      actorType: 'customer',
+      req,
+      meta: {
+        email: user.email,
+        fields: Object.keys(updates).filter((k) => k !== 'password')
+      }
+    })
     res.json({ user, token: signCustomerToken(user.email) })
   } catch (error) {
     next(error)

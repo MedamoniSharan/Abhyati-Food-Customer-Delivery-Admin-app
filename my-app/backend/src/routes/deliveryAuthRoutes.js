@@ -65,6 +65,12 @@ deliveryAuthRoutes.post('/login', async (req, res, next) => {
     const input = loginSchema.parse(req.body)
     const { public: user, id } = await loginDriverUser(input)
     const token = signDriverToken(id, user.email)
+    appendAdminAudit({
+      action: 'driver.login',
+      outcome: 'ok',
+      meta: { email: user.email, driverId: id },
+      req
+    })
     res.json({
       message: 'Login successful',
       user,
@@ -73,8 +79,10 @@ deliveryAuthRoutes.post('/login', async (req, res, next) => {
   } catch (error) {
     if (error.statusCode === 401) {
       appendAdminAudit({
-        action: 'driver_login_failed',
-        meta: { email: req.body?.email }
+        action: 'driver.login',
+        outcome: 'fail',
+        meta: { email: req.body?.email },
+        req
       })
     }
     next(error)

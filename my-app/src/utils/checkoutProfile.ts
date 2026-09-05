@@ -17,7 +17,7 @@ function hasDeliveryAddress(user: AuthUser): boolean {
 export function getCheckoutProfileGaps(user: AuthUser): string[] {
   const gaps: string[] = []
   if (!hasMeaningfulName(user.fullName)) gaps.push('your full name')
-  if (!hasValidMobile(user.mobile)) gaps.push('a valid 10-digit Indian mobile number')
+  if (!hasValidMobile(user.mobile)) gaps.push('a 10-digit mobile number (without +91)')
   if (!hasDeliveryAddress(user)) gaps.push('your delivery address')
   return gaps
 }

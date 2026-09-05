@@ -3,7 +3,7 @@ import type { AuthUser } from '../services/authApi'
 import { fetchAuthMe, patchCustomerProfile } from '../services/authApi'
 import { readAuthToken } from '../utils/authSession'
 import { isGoogleMapsUrl } from '../utils/mapsLink'
-import { looksLikeIndiaMobile, normalizeIndiaMobile } from '../utils/indiaMobile'
+import { looksLikeIndiaMobile, sanitizeTenDigitMobileInput, toTenDigitIndiaMobile } from '../utils/indiaMobile'
 
 type Props = {
   user: AuthUser | null
@@ -16,7 +16,7 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
   const [fullName, setFullName] = useState(user?.fullName ?? '')
   const [email, setEmail] = useState(user?.email ?? '')
   const [baselineEmail, setBaselineEmail] = useState(user?.email ?? '')
-  const [mobile, setMobile] = useState(user?.mobile ?? '')
+  const [mobile, setMobile] = useState(() => toTenDigitIndiaMobile(user?.mobile) || '')
   const [deliveryAddress, setDeliveryAddress] = useState(user?.deliveryAddress ?? '')
   const [mapsLink, setMapsLink] = useState(user?.mapsLink ?? '')
   const [newPassword, setNewPassword] = useState('')
@@ -38,7 +38,7 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
       setFullName(fresh.fullName)
       setEmail(fresh.email)
       setBaselineEmail(fresh.email)
-      setMobile(fresh.mobile ?? '')
+      setMobile(toTenDigitIndiaMobile(fresh.mobile) || '')
       setDeliveryAddress(fresh.deliveryAddress ?? '')
       setMapsLink(fresh.mapsLink ?? '')
       setBoot(false)
@@ -71,7 +71,7 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
       return
     }
     if (!looksLikeIndiaMobile(mobile.trim())) {
-      onNotify('Enter a valid 10-digit Indian mobile number.', 'warning')
+      onNotify('Enter a 10-digit mobile number (without +91).', 'warning')
       return
     }
     if (deliveryAddress.trim().length > 0 && deliveryAddress.trim().length < 5) {
@@ -97,7 +97,7 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
       } = {
         fullName: fullName.trim(),
         email: email.trim(),
-        mobile: normalizeIndiaMobile(mobile.trim()) || mobile.trim(),
+        mobile: mobile.trim(),
         deliveryAddress: deliveryAddress.trim(),
         mapsLink: mapsTrim
       }
@@ -171,14 +171,15 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
               className="auth-input"
               type="tel"
               inputMode="numeric"
+              pattern="[6-9][0-9]{9}"
               value={mobile}
-              onChange={(e) => setMobile(e.target.value)}
+              onChange={(e) => setMobile(sanitizeTenDigitMobileInput(e.target.value))}
               autoComplete="tel"
-              placeholder="10-digit Indian mobile"
-              maxLength={14}
+              placeholder="10-digit mobile (no +91)"
+              maxLength={10}
             />
             <p className="muted-pad" style={{ marginTop: -4, marginBottom: 12 }}>
-              Required for delivery. Drivers use this number to call you.
+              Enter 10 digits only — do not add +91. Drivers use this number to call you.
             </p>
 
             <label className="settings-label" htmlFor="cust-address">

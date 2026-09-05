@@ -1,6 +1,7 @@
 /**
  * Normalize to India E.164 without plus: 91 + 10 digits.
- * Accepts 10-digit local, 91XXXXXXXXXX, +91..., or 0XXXXXXXXXX.
+ * Accepts flexible stored/legacy values for reads (10-digit, 91…, +91…, 0…).
+ * User-facing forms must use {@link isTenDigitIndiaMobileInput} (plain 10 digits only).
  */
 export function normalizeIndiaMobile(input: string | null | undefined): string {
   const digits = String(input || '').replace(/\D/g, '')
@@ -13,13 +14,31 @@ export function normalizeIndiaMobile(input: string | null | undefined): string {
   return ''
 }
 
+/** True only for plain 10-digit Indian mobile (no +91 / 91 / spaces). */
+export function isTenDigitIndiaMobileInput(input: string | null | undefined): boolean {
+  return /^[6-9]\d{9}$/.test(String(input || '').trim())
+}
+
 export function isValidIndiaMobile(input: string | null | undefined): boolean {
   return Boolean(normalizeIndiaMobile(input))
 }
 
-/** Alias used by auth forms. */
+/** Form validation: user must type exactly 10 digits, no country code. */
 export function looksLikeIndiaMobile(value: string): boolean {
-  return isValidIndiaMobile(value)
+  return isTenDigitIndiaMobileInput(value)
+}
+
+/** Local 10 digits for form inputs (strips +91 / formatting from stored values). */
+export function toTenDigitIndiaMobile(input: string | null | undefined): string {
+  const n = normalizeIndiaMobile(input)
+  return n ? n.slice(2) : ''
+}
+
+/** Keep only digits and cap at 10 — for controlled mobile inputs. */
+export function sanitizeTenDigitMobileInput(raw: string): string {
+  return String(raw || '')
+    .replace(/\D/g, '')
+    .slice(0, 10)
 }
 
 /** Display as +91 XXXXX XXXXX when valid; otherwise trimmed raw. */

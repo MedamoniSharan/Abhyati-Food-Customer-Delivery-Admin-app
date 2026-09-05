@@ -23,6 +23,7 @@ import {
 import { compareOrderDateDesc, mapInvoiceToOrder } from '../services/orderMapping.js'
 import { hydrateInvoicesWithLineItems } from '../services/orderInvoiceHydrate.js'
 import { notifyCustomerOrderPlaced } from '../services/notificationService.js'
+import { appendAuditEvent } from '../services/adminAuditService.js'
 import {
   countUnreadForRecipient,
   listNotificationsForRecipient,
@@ -243,6 +244,17 @@ customerRoutes.post('/orders', async (req, res, next) => {
     const existing = await findExistingInvoiceByReference(customerId, referenceNumber)
     if (existing) {
       const order = mapInvoiceToOrder(existing, null)
+      appendAuditEvent({
+        action: 'order.create',
+        outcome: 'ok',
+        stage: 'idempotent_replay',
+        req,
+        meta: {
+          referenceNumber,
+          invoiceId: existing?.invoice_id,
+          customerId
+        }
+      })
       res.status(200).json({
         message: 'Order already created',
         salesorder: null,
@@ -280,6 +292,22 @@ customerRoutes.post('/orders', async (req, res, next) => {
     } catch {
       /* non-fatal */
     }
+
+    appendAuditEvent({
+      action: 'order.create',
+      outcome: 'ok',
+      stage: 'created',
+      req,
+      meta: {
+        referenceNumber,
+        invoiceId: invoice?.invoice_id,
+        invoiceNumber: invoice?.invoice_number,
+        salesorderId: salesorder?.salesorder_id,
+        lineCount: resolvedLines.length,
+        amountInr: invoice?.total,
+        customerId
+      }
+    })
 
     res.status(201).json({
       message: 'Order created',

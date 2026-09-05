@@ -1,4 +1,5 @@
 import { getApiBaseCandidates, logApiCandidatesOnce } from '../config/api'
+import { clientAudit } from '../utils/clientAudit'
 
 export type AuthUser = {
   id: string
@@ -44,6 +45,7 @@ type ParsedBody = {
   user?: AuthUser
   token?: string
   mobile?: string
+  requestId?: string
   zoho?: { message?: string }
   zoho_auth_hint?: string
 }
@@ -73,7 +75,7 @@ async function authRequest(
   path: string,
   payload: Record<string, string | undefined>,
   options?: { expectUser?: boolean }
-): Promise<LoginResponse & { mobile?: string }> {
+): Promise<LoginResponse & { mobile?: string; requestId?: string; correlationId?: string }> {
   const expectUser = options?.expectUser !== false
   logApiCandidatesOnce(API_BASE_URL_CANDIDATES)
   let lastError: unknown = null
@@ -81,6 +83,7 @@ async function authRequest(
   for (const baseUrl of API_BASE_URL_CANDIDATES) {
     try {
       const url = `${baseUrl.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`
+      clientAudit('auth.request', 'info', { path, baseUrl: baseUrl || '(vite-proxy)' })
       const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -88,9 +91,17 @@ async function authRequest(
       })
       const text = await response.text()
       const data = parseJsonBody(text)
+      const correlationId = response.headers.get('x-request-id') || undefined
 
       if (!response.ok) {
         const msg = formatAuthErrorMessage(data, response.status)
+        clientAudit('auth.request', 'fail', {
+          path,
+          status: response.status,
+          message: msg,
+          correlationId,
+          msg91RequestId: data.requestId
+        })
         if (response.status >= 400 && response.status < 500) {
           throw new AuthClientError(msg)
         }
@@ -101,11 +112,21 @@ async function authRequest(
         throw new Error('Invalid response from server')
       }
 
+      clientAudit('auth.request', 'ok', {
+        path,
+        status: response.status,
+        correlationId,
+        msg91RequestId: data.requestId,
+        mobile: data.mobile
+      })
+
       return {
         message: data.message || 'OK',
         user: data.user as AuthUser,
         token: data.token,
-        mobile: typeof data.mobile === 'string' ? data.mobile : undefined
+        mobile: typeof data.mobile === 'string' ? data.mobile : undefined,
+        requestId: typeof data.requestId === 'string' ? data.requestId : undefined,
+        correlationId
       }
     } catch (error) {
       if (error instanceof AuthClientError) {
@@ -115,6 +136,7 @@ async function authRequest(
       const message = error instanceof Error ? error.message : String(error)
       const isAbort = error instanceof Error && error.name === 'AbortError'
       console.warn('[API] auth request failed', { baseUrl, path, isAbort, message })
+      clientAudit('auth.request', 'fail', { path, baseUrl, isAbort, message })
     }
   }
 
@@ -147,14 +169,26 @@ export type SignupPayload = {
   mapsLink?: string
 }
 
-export async function sendSignupOtp(mobile: string): Promise<{ message: string }> {
+export async function sendSignupOtp(
+  mobile: string
+): Promise<{ message: string; requestId?: string; correlationId?: string }> {
   const result = await authRequest('/api/auth/otp/send', { mobile: mobile.trim() }, { expectUser: false })
-  return { message: result.message }
+  return {
+    message: result.message,
+    requestId: result.requestId,
+    correlationId: result.correlationId
+  }
 }
 
-export async function resendSignupOtp(mobile: string): Promise<{ message: string }> {
+export async function resendSignupOtp(
+  mobile: string
+): Promise<{ message: string; requestId?: string; correlationId?: string }> {
   const result = await authRequest('/api/auth/otp/resend', { mobile: mobile.trim() }, { expectUser: false })
-  return { message: result.message }
+  return {
+    message: result.message,
+    requestId: result.requestId,
+    correlationId: result.correlationId
+  }
 }
 
 export async function signupCustomer(payload: SignupPayload): Promise<LoginResponse> {

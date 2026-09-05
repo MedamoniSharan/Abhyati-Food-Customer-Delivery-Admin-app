@@ -186,7 +186,7 @@ export async function resendOtp(mobile) {
   }
 
   try {
-    await msg91Request('/otp/retry', {
+    const data = await msg91Request('/otp/retry', {
       method: 'GET',
       query: {
         retrytype: 'text',
@@ -194,7 +194,12 @@ export async function resendOtp(mobile) {
       },
       mapFailure: mapResendFailure
     })
-    return { mobile: normalized }
+    const requestId = data?.request_id || data?.requestId || null
+    log.info('MSG91 OTP retry accepted', {
+      mobile: `${normalized.slice(0, 4)}****${normalized.slice(-2)}`,
+      requestId
+    })
+    return { mobile: normalized, requestId }
   } catch (err) {
     log.warn('MSG91 OTP retry failed; falling back to fresh send', {
       mobile: `${normalized.slice(0, 4)}****${normalized.slice(-2)}`,

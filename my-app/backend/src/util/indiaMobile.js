@@ -1,6 +1,7 @@
 /**
  * Normalize to India E.164 without plus: 91 + 10 digits.
- * Accepts 10-digit local, 91XXXXXXXXXX, +91..., or 0XXXXXXXXXX.
+ * Accepts flexible stored/legacy values for reads (10-digit, 91…, +91…, 0…).
+ * User-facing OTP/signup input must use {@link isTenDigitIndiaMobileInput}.
  */
 export function normalizeIndiaMobile(input) {
   const digits = String(input || '').replace(/\D/g, '')
@@ -13,8 +14,19 @@ export function normalizeIndiaMobile(input) {
   return ''
 }
 
+/** True only for plain 10-digit Indian mobile (no +91 / 91 / spaces). */
+export function isTenDigitIndiaMobileInput(input) {
+  return /^[6-9]\d{9}$/.test(String(input || '').trim())
+}
+
 export function isValidIndiaMobile(input) {
   return Boolean(normalizeIndiaMobile(input))
+}
+
+/** Local 10 digits for forms (strips +91 / formatting from stored values). */
+export function toTenDigitIndiaMobile(input) {
+  const n = normalizeIndiaMobile(input)
+  return n ? n.slice(2) : ''
 }
 
 /** Display as +91 XXXXX XXXXX when valid; otherwise trimmed raw. */

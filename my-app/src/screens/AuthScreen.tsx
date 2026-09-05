@@ -3,7 +3,7 @@ import { useToast } from '../contexts/ToastContext'
 import { loginCustomer, resendSignupOtp, sendSignupOtp, signupCustomer } from '../services/authApi'
 import type { AuthUser } from '../services/authApi'
 import { isGoogleMapsUrl } from '../utils/mapsLink'
-import { looksLikeIndiaMobile, normalizeIndiaMobile } from '../utils/indiaMobile'
+import { looksLikeIndiaMobile, sanitizeTenDigitMobileInput } from '../utils/indiaMobile'
 
 export type AuthSuccessPayload = {
   message: string
@@ -126,7 +126,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
       return false
     }
     if (!looksLikeIndiaMobile(mob)) {
-      showToast('Enter a valid 10-digit Indian mobile number', { variant: 'error' })
+      showToast('Enter a 10-digit mobile number (without +91)', { variant: 'error' })
       return false
     }
     if (password.length < 6) {
@@ -177,7 +177,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
   async function handleSendOtp() {
     const mob = mobile.trim()
     if (!looksLikeIndiaMobile(mob)) {
-      showToast('Enter a valid 10-digit Indian mobile number', { variant: 'error' })
+      showToast('Enter a 10-digit mobile number (without +91)', { variant: 'error' })
       return
     }
     // Still require core signup fields so OTP is not wasted on incomplete forms
@@ -185,10 +185,11 @@ export function AuthScreen({ onAuthenticated }: Props) {
     setOtpLoading(true)
     setOtpError('')
     try {
-      await sendSignupOtp(mob)
+      const result = await sendSignupOtp(mob)
       setOtpSent(true)
       setResendIn(OTP_RESEND_SECONDS)
-      showToast('OTP sent to your mobile', { variant: 'success' })
+      const idHint = result.requestId ? ` (id ${result.requestId.slice(0, 10)}…)` : ''
+      showToast(`OTP sent to your mobile${idHint}`, { variant: 'success' })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to send OTP'
       showToast(message, { variant: 'error' })
@@ -200,7 +201,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
   async function handleResendOtp() {
     if (resendIn > 0) return
     if (!looksLikeIndiaMobile(mobile.trim())) {
-      showToast('Enter a valid 10-digit Indian mobile number', { variant: 'error' })
+      showToast('Enter a 10-digit mobile number (without +91)', { variant: 'error' })
       return
     }
     setOtpLoading(true)
@@ -236,7 +237,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
 
     const name = fullName.trim()
     const em = email.trim()
-    const mob = normalizeIndiaMobile(mobile.trim()) || mobile.trim()
+    const mob = mobile.trim()
     const addr = deliveryAddress.trim()
     const maps = mapsLink.trim()
 
@@ -318,14 +319,16 @@ export function AuthScreen({ onAuthenticated }: Props) {
           />
           <input
             className="auth-input"
-            placeholder="10-digit Indian mobile"
+            placeholder="10-digit mobile (no +91)"
             type="tel"
             autoComplete="tel"
-            inputMode="tel"
+            inputMode="numeric"
+            pattern="[6-9][0-9]{9}"
+            maxLength={10}
             required
             value={mobile}
             onChange={(e) => {
-              setMobile(e.target.value)
+              setMobile(sanitizeTenDigitMobileInput(e.target.value))
               setOtpSent(false)
               setOtp('')
               setOtpError('')
