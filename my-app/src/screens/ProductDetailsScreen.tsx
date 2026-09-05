@@ -15,10 +15,13 @@ import {
   type ZohoSpecRow,
 } from '../utils/productDetailFromZoho'
 
+const PRIMARY_SPEC_LABELS = new Set(['SKU', 'Unit', 'HSN/SAC'])
+
 type Props = {
   product: Product
   onBack: () => void
   onOpenCart: () => void
+  cartCount?: number
   onAddToCart: (product: Product, quantity: number) => void
   onBuyNow: (product: Product, quantity: number) => void
 }
@@ -70,11 +73,19 @@ function ProductDetailPageSkeleton() {
   )
 }
 
-export function ProductDetailsScreen({ product, onBack, onAddToCart, onBuyNow }: Props) {
+export function ProductDetailsScreen({
+  product,
+  onBack,
+  onOpenCart,
+  cartCount = 0,
+  onAddToCart,
+  onBuyNow,
+}: Props) {
   const { showToast } = useToast()
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null)
   const [detailLoading, setDetailLoading] = useState(Boolean(product.zohoItemId))
   const [detailError, setDetailError] = useState<string | null>(null)
+  const [specsExpanded, setSpecsExpanded] = useState(false)
 
   const [quantity, setQuantity] = useState(() => product.minPurchaseCount ?? 1)
 
@@ -88,10 +99,10 @@ export function ProductDetailsScreen({ product, onBack, onAddToCart, onBuyNow }:
     let cancelled = false
     setDetailLoading(true)
     setDetailError(null)
-    void fetchZohoItemDetail(product.zohoItemId).then((item) => {
+    void fetchZohoItemDetail(product.zohoItemId).then(({ item, error }) => {
       if (cancelled) return
       setDetail(item)
-      if (!item) setDetailError('Could not load product details from the server.')
+      if (!item) setDetailError(error || 'Could not load product details. Please try again.')
       setDetailLoading(false)
     })
     return () => {
@@ -148,6 +159,17 @@ export function ProductDetailsScreen({ product, onBack, onAddToCart, onBuyNow }:
     return fallbackSpecRows(product)
   }, [detail, product])
 
+  const primarySpecs = useMemo(
+    () => specRows.filter((row) => PRIMARY_SPEC_LABELS.has(row.label)),
+    [specRows],
+  )
+  const extraSpecs = useMemo(
+    () => specRows.filter((row) => !PRIMARY_SPEC_LABELS.has(row.label)),
+    [specRows],
+  )
+  const visibleSpecs = specsExpanded ? [...primarySpecs, ...extraSpecs] : primarySpecs.length > 0 ? primarySpecs : specRows.slice(0, 3)
+  const hasMoreSpecs = extraSpecs.length > 0 && primarySpecs.length > 0
+
   const total = useMemo(() => displayRate * quantity, [displayRate, quantity])
 
   const productForCart = useMemo((): Product => {
@@ -182,13 +204,28 @@ export function ProductDetailsScreen({ product, onBack, onAddToCart, onBuyNow }:
   const badgeLabel = product.badge?.label || 'Eco-friendly'
   const categoryLabel = (product.category || 'Product').trim().toUpperCase()
 
+  const cartButton = (
+    <button
+      type="button"
+      className={`icon-btn pd-v2-cart-btn${cartCount > 0 ? ' with-dot' : ''}`}
+      aria-label={cartCount > 0 ? `Open cart, ${cartCount} items` : 'Open cart'}
+      onClick={onOpenCart}
+    >
+      <span className="material-symbols-outlined">shopping_cart</span>
+      {cartCount > 0 ? <span className="cart-icon-badge">{cartCount > 99 ? '99+' : cartCount}</span> : null}
+    </button>
+  )
+
   return (
     <div className="pd-v2">
       {showBootstrapLoader ? (
         <main className="pd-v2-main pd-v2-loading">
-          <button type="button" className="pd-v2-back" onClick={onBack} aria-label="Back">
-            <span className="material-symbols-outlined">arrow_back</span>
-          </button>
+          <div className="pd-v2-top-actions">
+            <button type="button" className="pd-v2-back" onClick={onBack} aria-label="Back">
+              <span className="material-symbols-outlined">arrow_back</span>
+            </button>
+            {cartButton}
+          </div>
           <CatalogLoader label="Loading product details…" />
           <ProductDetailPageSkeleton />
         </main>
@@ -197,9 +234,12 @@ export function ProductDetailsScreen({ product, onBack, onAddToCart, onBuyNow }:
           <main className="pd-v2-main">
             <section className="pd-v2-hero">
               <ProductImage product={product} className="pd-v2-hero-img" />
-              <button type="button" className="pd-v2-back" onClick={onBack} aria-label="Back">
-                <span className="material-symbols-outlined">arrow_back</span>
-              </button>
+              <div className="pd-v2-top-actions">
+                <button type="button" className="pd-v2-back" onClick={onBack} aria-label="Back">
+                  <span className="material-symbols-outlined">arrow_back</span>
+                </button>
+                {cartButton}
+              </div>
               <span className="pd-v2-eco-badge">
                 <span className="material-symbols-outlined">eco</span>
                 {badgeLabel}
@@ -263,9 +303,24 @@ export function ProductDetailsScreen({ product, onBack, onAddToCart, onBuyNow }:
 
               {specRows.length > 0 ? (
                 <section className="pd-v2-section">
-                  <h2 className="pd-v2-section-label">Specifications</h2>
+                  <div className="pd-v2-specs-head">
+                    <h2 className="pd-v2-section-label">Specifications</h2>
+                    {hasMoreSpecs ? (
+                      <button
+                        type="button"
+                        className="pd-v2-specs-toggle"
+                        aria-expanded={specsExpanded}
+                        onClick={() => setSpecsExpanded((v) => !v)}
+                      >
+                        {specsExpanded ? 'Hide details' : 'More details'}
+                        <span className="material-symbols-outlined" aria-hidden>
+                          {specsExpanded ? 'expand_less' : 'expand_more'}
+                        </span>
+                      </button>
+                    ) : null}
+                  </div>
                   <div className="pd-v2-specs">
-                    {specRows.map((row, index) => (
+                    {visibleSpecs.map((row, index) => (
                       <div key={`${index}-${row.label}`} className="pd-v2-spec-row">
                         <small>{row.label}</small>
                         <p className={row.label === 'Description' ? 'spec-value-multiline' : undefined}>{row.value}</p>

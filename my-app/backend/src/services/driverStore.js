@@ -19,10 +19,34 @@ function normalizeEmail(email) {
   return email.trim().toLowerCase()
 }
 
+/** Zoho often returns phone on `phone` / contact persons — not only root `mobile`. */
+function pickMobileFromContact(contact) {
+  const root =
+    String(contact?.mobile ?? '').trim() ||
+    String(contact?.phone ?? '').trim() ||
+    String(contact?.work_phone ?? '').trim()
+  if (root) return root
+  const persons = Array.isArray(contact?.contact_persons) ? contact.contact_persons : []
+  const primary = persons.find((p) => p?.is_primary_contact === true) || persons[0]
+  return String(primary?.mobile ?? primary?.phone ?? '').trim()
+}
+
+/**
+ * Mirror phone onto root `mobile`/`phone` and primary contact person (same pattern as customers).
+ */
+function contactPersonsWithPrimaryPhone(contact, mobileVal) {
+  const v = String(mobileVal ?? '').trim()
+  const persons = Array.isArray(contact?.contact_persons) ? contact.contact_persons : []
+  if (persons.length === 0) return undefined
+  let idx = persons.findIndex((p) => p?.is_primary_contact === true)
+  if (idx < 0) idx = 0
+  return persons.map((p, i) => (i === idx ? { ...p, phone: v, mobile: v } : { ...p }))
+}
+
 function toPublicDriver(contact) {
   const id = String(contact?.contact_id ?? '')
   const active = contact?.is_active !== false && contact?.is_active !== 'false'
-  const mobile = String(contact?.mobile ?? '').trim()
+  const mobile = pickMobileFromContact(contact)
   return {
     id,
     fullName: String(contact?.contact_name || contact?.email || 'Driver'),
@@ -180,11 +204,24 @@ export async function updateDriverRecord(currentEmail, { fullName, email, passwo
   if (!contact?.contact_id) return null
 
   const nextEmail = email ? normalizeEmail(email) : normalizeEmail(String(contact.email || ''))
+  const detailBefore = await getModuleById('/contacts', contact.contact_id)
+  const current = detailBefore?.contact || detailBefore || contact
+
   const payload = {
     contact_id: contact.contact_id,
     ...(typeof fullName === 'string' && fullName.trim() ? { contact_name: fullName.trim() } : {}),
     ...(email ? { email: nextEmail } : {}),
-    ...(mobile !== undefined ? { mobile: String(mobile ?? '').trim() } : {})
+    ...(mobile !== undefined
+      ? (() => {
+          const m = String(mobile ?? '').trim()
+          const nextPersons = contactPersonsWithPrimaryPhone(current, m)
+          return {
+            mobile: m,
+            phone: m,
+            ...(nextPersons ? { contact_persons: nextPersons } : {})
+          }
+        })()
+      : {})
   }
   if (Object.keys(payload).length > 1) {
     await updateModule('/contacts', contact.contact_id, payload)

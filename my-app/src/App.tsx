@@ -25,6 +25,7 @@ import { matchOrderToProduct } from './utils/orders'
 function App() {
   const { showToast } = useToast()
   const [screen, setScreen] = useState<Screen>('home')
+  const screenHistoryRef = useRef<Screen[]>([])
   const [isAuthenticated, setIsAuthenticated] = useState(readSignedIn)
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(() => (readSignedIn() ? readSessionUser() : null))
   const [checkoutBusy, setCheckoutBusy] = useState(false)
@@ -439,19 +440,42 @@ function App() {
     if (line) showToast(`${line.product.name} removed from cart`, { variant: 'info' })
   }
 
+  function navigateTo(target: Screen, options?: { replace?: boolean }) {
+    if (options?.replace) {
+      setScreen(target)
+      return
+    }
+    if (screen !== target) {
+      screenHistoryRef.current = [...screenHistoryRef.current, screen]
+    }
+    setScreen(target)
+  }
+
+  function goBack(fallback: Screen = 'home') {
+    const prev = screenHistoryRef.current
+    if (prev.length === 0) {
+      setScreen(fallback)
+      return
+    }
+    const previous = prev[prev.length - 1] ?? fallback
+    screenHistoryRef.current = prev.slice(0, -1)
+    setScreen(previous)
+  }
+
   function openProduct(product: Product) {
     setSelectedProduct(product)
-    setScreen('product')
+    navigateTo('product')
   }
 
   function navigateFromMenu(target: 'home' | 'orders' | 'cart' | 'account') {
+    screenHistoryRef.current = []
     setScreen(target)
     setIsMenuOpen(false)
   }
 
   function handleBuyNow(product: Product, quantity: number) {
     addToCart(product, quantity)
-    setScreen('cart')
+    navigateTo('cart')
     showToast('Proceeding to checkout', { variant: 'info' })
   }
 
@@ -459,7 +483,7 @@ function App() {
     const match = matchOrderToProduct(order, catalogProducts)
     if (!match) return
     addToCart(match, defaultAddQuantity(match))
-    setScreen('cart')
+    navigateTo('cart')
   }
 
   async function handleCheckout(mode: CheckoutPaymentMode = 'pay_later') {
@@ -494,6 +518,7 @@ function App() {
       const list =
         gaps.length === 1 ? gaps[0] : `${gaps.slice(0, -1).join(', ')} and ${gaps[gaps.length - 1] ?? ''}`
       showToast(`Add ${list} in Account settings before checkout.`, { variant: 'warning' })
+      screenHistoryRef.current = []
       setScreen('settings')
       return
     }
@@ -579,6 +604,8 @@ function App() {
           onQueryChange={setSearchQuery}
           onOpenProduct={openProduct}
           onAddToCart={(product) => addToCart(product, defaultAddQuantity(product))}
+          cartCount={cartCount}
+          onOpenCart={() => navigateTo('cart')}
           isMenuOpen={isMenuOpen}
           onToggleMenu={() => setIsMenuOpen((prev) => !prev)}
           onCloseMenu={() => setIsMenuOpen(false)}
@@ -597,8 +624,9 @@ function App() {
       return (
         <ProductDetailsScreen
           product={selectedProduct}
-          onBack={() => setScreen('home')}
-          onOpenCart={() => setScreen('cart')}
+          onBack={() => goBack('home')}
+          onOpenCart={() => navigateTo('cart')}
+          cartCount={cartCount}
           onAddToCart={addToCart}
           onBuyNow={handleBuyNow}
         />
@@ -625,7 +653,7 @@ function App() {
           onRetryLoad={() => void refreshOrderHistory()}
           onBackHome={() => {
             setSelectedOrder(null)
-            setScreen('home')
+            goBack('home')
           }}
           onTrackOrder={(order) => setSelectedOrder(order)}
           onViewDetails={(order) => setSelectedOrder(order)}
@@ -650,7 +678,7 @@ function App() {
       return (
         <CartScreen
           cartItems={cartItems}
-          onBackHome={() => setScreen('home')}
+          onBackHome={() => goBack('home')}
           onIncrease={(productId) => updateCartQuantity(productId, 'increase')}
           onDecrease={(productId) => updateCartQuantity(productId, 'decrease')}
           onRemove={removeFromCart}
@@ -664,7 +692,7 @@ function App() {
       return (
         <SettingsScreen
           user={readSessionUser()}
-          onBack={() => setScreen('account')}
+          onBack={() => goBack('account')}
           onSaved={(nextUser, token) => {
             writeSignedIn(nextUser, token)
             setSessionUser(nextUser)
@@ -677,8 +705,8 @@ function App() {
     return (
       <AccountScreen
         user={readSessionUser()}
-        onNavigateOrders={() => setScreen('orders')}
-        onOpenSettings={() => setScreen('settings')}
+        onNavigateOrders={() => navigateTo('orders')}
+        onOpenSettings={() => navigateTo('settings')}
         onOpenAddresses={() => []}
         onOpenPayments={() => []}
         onLogout={() => {
@@ -727,7 +755,14 @@ function App() {
               {renderScreen()}
             </PullToRefresh>
           </div>
-          <BottomNav screen={screen} cartCount={cartCount} onChange={setScreen} />
+          <BottomNav
+            screen={screen}
+            cartCount={cartCount}
+            onChange={(target) => {
+              screenHistoryRef.current = []
+              setScreen(target)
+            }}
+          />
         </NotificationsProvider>
       )}
     </div>

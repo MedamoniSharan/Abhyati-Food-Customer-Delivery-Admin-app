@@ -74,6 +74,8 @@ export function OrderProofPreviewModal({ order, onClose, onNotify }: Props) {
   }, [lightbox, onClose])
 
   const recipient = summary?.recipientName || order.proofMeta?.recipientName
+  const fileName = summary?.fileName?.trim()
+  const notes = summary?.notes?.trim()
   const lightboxSrc = lightbox === 'photo' ? photoUrl : lightbox === 'signature' ? signatureUrl : null
 
   return (
@@ -117,6 +119,24 @@ export function OrderProofPreviewModal({ order, onClose, onNotify }: Props) {
                   <p>
                     <span>Delivered</span>
                     <strong>{new Date(order.deliveredAt || summary?.deliveredAt || '').toLocaleString()}</strong>
+                  </p>
+                ) : null}
+                {summary?.uploadedAt ? (
+                  <p>
+                    <span>Proof uploaded</span>
+                    <strong>{new Date(summary.uploadedAt).toLocaleString()}</strong>
+                  </p>
+                ) : null}
+                {fileName ? (
+                  <p>
+                    <span>File</span>
+                    <strong>{fileName}</strong>
+                  </p>
+                ) : null}
+                {notes ? (
+                  <p>
+                    <span>Notes</span>
+                    <strong className="spec-value-multiline">{notes}</strong>
                   </p>
                 ) : null}
               </div>

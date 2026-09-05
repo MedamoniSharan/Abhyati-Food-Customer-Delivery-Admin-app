@@ -50,7 +50,22 @@ function mapMsg91Failure(data, fallback) {
   return msg91Error(text.length < 120 ? text : fallback)
 }
 
-async function msg91Request(path, { method = 'GET', query = {} } = {}) {
+/** Resend/retry failures must not reuse verify-OTP copy ("Request a new one"). */
+function mapResendFailure(data) {
+  const raw = data?.message
+  const text = typeof raw === 'string' ? raw.trim() : ''
+  if (!text) return msg91Error('Could not resend OTP. Try again.')
+  const lower = text.toLowerCase()
+  if (lower.includes('invalid mobile') || lower.includes('mobile number')) {
+    return msg91Error('Enter a valid Indian mobile number')
+  }
+  if (lower.includes('auth') || lower.includes('template')) {
+    return msg91Error('Phone verification service error. Try again later.', 502)
+  }
+  return msg91Error('Could not resend OTP. Try again.')
+}
+
+async function msg91Request(path, { method = 'GET', query = {}, mapFailure = mapMsg91Failure } = {}) {
   requireConfigured()
   const url = new URL(`${MSG91_BASE}${path}`)
   for (const [key, value] of Object.entries(query)) {
@@ -90,12 +105,12 @@ async function msg91Request(path, { method = 'GET', query = {} } = {}) {
 
   if (!okHttp || (!okType && !messageOk && type === 'error')) {
     log.warn('MSG91 error response', { path, status: response.status, data })
-    throw mapMsg91Failure(data, 'Phone verification failed')
+    throw mapFailure(data, 'Phone verification failed')
   }
 
   if (type === 'error') {
     log.warn('MSG91 type=error', { path, data })
-    throw mapMsg91Failure(data, 'Phone verification failed')
+    throw mapFailure(data, 'Phone verification failed')
   }
 
   return data
@@ -161,7 +176,7 @@ export async function verifyOtp(mobile, otp) {
 }
 
 /**
- * Resend the same OTP (SMS retry).
+ * Resend the same OTP (SMS retry). Falls back to a fresh send if retry fails.
  * @param {string} mobile
  */
 export async function resendOtp(mobile) {
@@ -170,13 +185,30 @@ export async function resendOtp(mobile) {
     throw msg91Error('Enter a valid 10-digit Indian mobile number')
   }
 
-  await msg91Request('/otp/retry', {
-    method: 'GET',
-    query: {
-      retrytype: 'text',
-      mobile: normalized
+  try {
+    await msg91Request('/otp/retry', {
+      method: 'GET',
+      query: {
+        retrytype: 'text',
+        mobile: normalized
+      },
+      mapFailure: mapResendFailure
+    })
+    return { mobile: normalized }
+  } catch (err) {
+    log.warn('MSG91 OTP retry failed; falling back to fresh send', {
+      mobile: `${normalized.slice(0, 4)}****${normalized.slice(-2)}`,
+      message: err?.message
+    })
+    try {
+      return await sendOtp(normalized)
+    } catch (sendErr) {
+      throw msg91Error(
+        sendErr?.message && !/request a new one/i.test(String(sendErr.message))
+          ? sendErr.message
+          : 'Could not resend OTP. Try again.',
+        sendErr?.statusCode || 400
+      )
     }
-  })
-
-  return { mobile: normalized }
+  }
 }

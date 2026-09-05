@@ -52,7 +52,7 @@ function PasswordField({
         aria-pressed={showPassword}
       >
         <span className="material-symbols-outlined" aria-hidden>
-          {showPassword ? 'visibility_off' : 'visibility'}
+          {showPassword ? 'visibility' : 'visibility_off'}
         </span>
       </button>
     </div>
@@ -68,6 +68,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
   const [fullName, setFullName] = useState('')
   const [mobile, setMobile] = useState('')
   const [otp, setOtp] = useState('')
+  const [otpError, setOtpError] = useState('')
   const [otpSent, setOtpSent] = useState(false)
   const [resendIn, setResendIn] = useState(0)
   const [deliveryAddress, setDeliveryAddress] = useState('')
@@ -87,6 +88,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
     setView('login')
     setConfirmPassword('')
     setOtp('')
+    setOtpError('')
     setOtpSent(false)
     setResendIn(0)
   }
@@ -95,6 +97,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
     setView('signup')
     setConfirmPassword('')
     setOtp('')
+    setOtpError('')
     setOtpSent(false)
     setResendIn(0)
   }
@@ -139,8 +142,16 @@ export function AuthScreen({ onAuthenticated }: Props) {
 
   async function submitLogin() {
     const em = email.trim()
-    if (!em || !password) {
-      showToast('Enter your email and password', { variant: 'error' })
+    if (!em) {
+      showToast('Invalid email', { variant: 'error' })
+      return
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      showToast('Invalid email', { variant: 'error' })
+      return
+    }
+    if (!password) {
+      showToast('Invalid password', { variant: 'error' })
       return
     }
     setLoading(true)
@@ -164,10 +175,17 @@ export function AuthScreen({ onAuthenticated }: Props) {
   }
 
   async function handleSendOtp() {
+    const mob = mobile.trim()
+    if (!looksLikeIndiaMobile(mob)) {
+      showToast('Enter a valid 10-digit Indian mobile number', { variant: 'error' })
+      return
+    }
+    // Still require core signup fields so OTP is not wasted on incomplete forms
     if (!validateSignupFields()) return
     setOtpLoading(true)
+    setOtpError('')
     try {
-      await sendSignupOtp(mobile.trim())
+      await sendSignupOtp(mob)
       setOtpSent(true)
       setResendIn(OTP_RESEND_SECONDS)
       showToast('OTP sent to your mobile', { variant: 'success' })
@@ -201,14 +219,20 @@ export function AuthScreen({ onAuthenticated }: Props) {
   async function submitSignup() {
     if (!validateSignupFields()) return
     if (!otpSent) {
+      setOtpError('Send OTP to your mobile first')
       showToast('Send OTP to your mobile first', { variant: 'error' })
       return
     }
     const code = otp.trim()
-    if (!/^\d{4,9}$/.test(code)) {
-      showToast('Enter the OTP sent to your mobile', { variant: 'error' })
+    if (!code) {
+      setOtpError('Enter the OTP sent to your mobile')
       return
     }
+    if (!/^\d{4,9}$/.test(code)) {
+      setOtpError('Enter a valid OTP')
+      return
+    }
+    setOtpError('')
 
     const name = fullName.trim()
     const em = email.trim()
@@ -238,6 +262,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sign up failed'
+      if (/otp/i.test(message)) setOtpError(message)
       showToast(message, { variant: 'error' })
     } finally {
       setLoading(false)
@@ -303,6 +328,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
               setMobile(e.target.value)
               setOtpSent(false)
               setOtp('')
+              setOtpError('')
               setResendIn(0)
             }}
           />
@@ -341,14 +367,19 @@ export function AuthScreen({ onAuthenticated }: Props) {
 
           <div className="auth-otp-row">
             <input
-              className="auth-input auth-otp-input"
+              className={`auth-input auth-otp-input${otpError ? ' auth-input--error' : ''}`}
               placeholder="OTP"
               type="text"
               inputMode="numeric"
               autoComplete="one-time-code"
               maxLength={9}
               value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 9))}
+              aria-invalid={Boolean(otpError)}
+              aria-describedby={otpError ? 'signup-otp-error' : undefined}
+              onChange={(e) => {
+                setOtp(e.target.value.replace(/\D/g, '').slice(0, 9))
+                if (otpError) setOtpError('')
+              }}
               disabled={!otpSent}
             />
             <button
@@ -368,12 +399,17 @@ export function AuthScreen({ onAuthenticated }: Props) {
                   : 'Send OTP'}
             </button>
           </div>
+          {otpError ? (
+            <p id="signup-otp-error" className="auth-field-error" role="alert">
+              {otpError}
+            </p>
+          ) : null}
 
           <button
             type="button"
             className="auth-primary-btn"
             onClick={() => void submitSignup()}
-            disabled={loading || otpLoading || !otpSent || otp.trim().length < 4}
+            disabled={loading || otpLoading}
           >
             {loading ? 'Creating account...' : 'Sign up'}
           </button>

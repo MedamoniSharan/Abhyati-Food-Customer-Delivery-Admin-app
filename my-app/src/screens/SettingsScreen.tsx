@@ -186,7 +186,7 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
             </label>
             <textarea
               id="cust-address"
-              className="auth-input"
+              className="auth-input auth-textarea"
               rows={4}
               value={deliveryAddress}
               onChange={(e) => setDeliveryAddress(e.target.value)}
@@ -233,7 +233,7 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
                 aria-label={showNewPw ? 'Hide new password' : 'Show new password'}
                 onClick={() => setShowNewPw((v) => !v)}
               >
-                <span className="material-symbols-outlined">{showNewPw ? 'visibility_off' : 'visibility'}</span>
+                <span className="material-symbols-outlined">{showNewPw ? 'visibility' : 'visibility_off'}</span>
               </button>
             </div>
 
@@ -255,7 +255,7 @@ export function SettingsScreen({ user, onBack, onSaved, onNotify }: Props) {
                 aria-label={showCurPw ? 'Hide current password' : 'Show current password'}
                 onClick={() => setShowCurPw((v) => !v)}
               >
-                <span className="material-symbols-outlined">{showCurPw ? 'visibility_off' : 'visibility'}</span>
+                <span className="material-symbols-outlined">{showCurPw ? 'visibility' : 'visibility_off'}</span>
               </button>
             </div>
 

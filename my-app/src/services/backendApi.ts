@@ -248,14 +248,27 @@ export async function getBackendProducts(): Promise<Product[]> {
 }
 
 /** Full Zoho item (GET /items/:id) — includes stock locations, custom fields, etc. */
-export async function fetchZohoItemDetail(itemId: string): Promise<Record<string, unknown> | null> {
+export async function fetchZohoItemDetail(
+  itemId: string,
+): Promise<{ item: Record<string, unknown> | null; error: string | null }> {
   try {
     const data = await request<Record<string, unknown>>(`/api/customer/items/${encodeURIComponent(itemId)}`)
     const nested = data['item'] as Record<string, unknown> | undefined
-    if (nested && typeof nested === 'object') return nested
-    return data
-  } catch {
-    return null
+    if (nested && typeof nested === 'object') return { item: nested, error: null }
+    return { item: data, error: null }
+  } catch (err) {
+    if (err instanceof ClientApiError) {
+      if (err.status === 404) return { item: null, error: 'Product not found. It may have been removed from the catalog.' }
+      if (err.status === 401 || err.status === 403) {
+        return { item: null, error: 'Please sign in again to view product details.' }
+      }
+      return { item: null, error: err.message || 'Could not load product details. Please try again.' }
+    }
+    const offline =
+      typeof navigator !== 'undefined' && navigator.onLine === false
+        ? 'You appear to be offline. Check your connection and try again.'
+        : 'Could not reach the server. Please try again in a moment.'
+    return { item: null, error: offline }
   }
 }
 
@@ -328,6 +341,7 @@ export type OrderProofSummary = {
   hasPhoto?: boolean
   hasSignature?: boolean
   fileName?: string
+  notes?: string
 }
 
 export async function fetchOrderProofSummary(invoiceId: string): Promise<OrderProofSummary | null> {
@@ -377,10 +391,34 @@ export async function fetchOrderProofAsset(
   return null
 }
 
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer()
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(binary)
+}
+
+function downloadProofViaAnchor(blob: Blob, fileName: string) {
+  const link = document.createElement('a')
+  const objectUrl = URL.createObjectURL(blob)
+  link.href = objectUrl
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(objectUrl)
+}
+
 export async function downloadOrderProof(invoiceId: string): Promise<boolean> {
   if (!invoiceId) return false
   logApiCandidatesOnce(API_BASE_URL_CANDIDATES)
   const token = readAuthToken()
+  const fileName = `invoice-proof-${invoiceId}.jpg`
+
   for (const baseUrl of API_BASE_URL_CANDIDATES) {
     try {
       const url = `${baseUrl.replace(/\/$/, '')}/api/customer/orders/${encodeURIComponent(invoiceId)}/proof`
@@ -389,14 +427,43 @@ export async function downloadOrderProof(invoiceId: string): Promise<boolean> {
       const response = await fetch(url, { headers })
       if (!response.ok) continue
       const blob = await response.blob()
-      const link = document.createElement('a')
-      const objectUrl = URL.createObjectURL(blob)
-      link.href = objectUrl
-      link.download = `invoice-proof-${invoiceId}.jpg`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(objectUrl)
+      if (blob.size <= 0) continue
+
+      try {
+        const { Capacitor } = await import('@capacitor/core')
+        if (Capacitor.isNativePlatform()) {
+          const { Filesystem, Directory } = await import('@capacitor/filesystem')
+          const { Share } = await import('@capacitor/share')
+          const base64 = await blobToBase64(blob)
+          const written = await Filesystem.writeFile({
+            path: fileName,
+            data: base64,
+            directory: Directory.Cache,
+          })
+          await Share.share({
+            title: 'Delivery proof',
+            url: written.uri,
+            dialogTitle: 'Save or share proof',
+          })
+          return true
+        }
+      } catch (nativeErr) {
+        console.warn('[API] native proof save failed; falling back to browser download', nativeErr)
+      }
+
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function' && typeof File !== 'undefined') {
+        try {
+          const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' })
+          if (navigator.canShare?.({ files: [file] })) {
+            await navigator.share({ files: [file], title: 'Delivery proof' })
+            return true
+          }
+        } catch {
+          /* user cancelled or share unsupported — fall through */
+        }
+      }
+
+      downloadProofViaAnchor(blob, fileName)
       return true
     } catch {
       /* try next base */

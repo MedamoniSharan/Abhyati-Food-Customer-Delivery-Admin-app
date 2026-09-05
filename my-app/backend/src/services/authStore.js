@@ -117,11 +117,29 @@ export async function getCustomerContactForApp(email) {
 
 /**
  * Writes app-login password hash into Zoho contact `notes` (customer marker).
+ * Re-GETs and retries once if notes do not round-trip (Zoho eventual consistency).
  */
 export async function attachCustomerCredentialOnZoho(contactId, password) {
   const hash = hashPassword(password)
   const notes = buildNotesWithCustomerHash(hash)
-  await updateModule('/contacts', contactId, { contact_id: contactId, notes })
+  const id = String(contactId)
+  await updateModule('/contacts', id, { contact_id: id, notes })
+
+  const assertHashPresent = async () => {
+    const data = await getModuleById('/contacts', id)
+    const c = data?.contact || data
+    return parseCustomerPasswordHashFromNotes(c?.notes) != null
+  }
+
+  if (await assertHashPresent()) return
+
+  log.warn('Customer credential notes missing after write; retrying attach', { contactId: id })
+  await updateModule('/contacts', id, { contact_id: id, notes })
+  if (await assertHashPresent()) return
+
+  const err = new Error('Could not save login credentials. Please try again.')
+  err.statusCode = 502
+  throw err
 }
 
 /** Creates app login by writing password hash into Zoho contact `notes` (customer marker). */
@@ -222,6 +240,17 @@ export async function signupCustomerUser({ fullName, email, password, mobile, de
       contactId: contact.contact_id
     })
     user = (await updateCustomerUserByEmail(normalizedEmail, profileSeed)) || user
+
+    // Profile PUTs can occasionally clear notes; ensure login hash is still present.
+    const after = await getModuleById('/contacts', contact.contact_id)
+    const afterContact = after?.contact || after
+    if (!parseCustomerPasswordHashFromNotes(afterContact?.notes)) {
+      log.warn('Signup profile update cleared credential notes; re-attaching', {
+        contactId: contact.contact_id
+      })
+      await attachCustomerCredentialOnZoho(contact.contact_id, password)
+    }
+
     return { user, zohoContactCreated }
   } catch (err) {
     if (zohoContactCreated) {
@@ -249,15 +278,39 @@ export async function signupCustomerUser({ fullName, email, password, mobile, de
 
 export async function loginCustomerUser({ email, password }) {
   const normalizedEmail = normalizeEmail(email)
-  const contact = await getCustomerContactForApp(normalizedEmail)
-  if (!contact) {
-    const error = new Error('Invalid email or password')
+  const listed = await findCustomerByEmail(normalizedEmail)
+  if (!listed?.contact_id) {
+    const error = new Error('Invalid email')
     error.statusCode = 401
     throw error
   }
+
+  const data = await getModuleById('/contacts', String(listed.contact_id))
+  const contact = data?.contact || data
+  if (!contact?.contact_id) {
+    const error = new Error('Invalid email')
+    error.statusCode = 401
+    throw error
+  }
+  if (contact.is_active === false || contact.is_active === 'false') {
+    const error = new Error('Invalid email')
+    error.statusCode = 401
+    throw error
+  }
+  if (parseDriverPasswordHashFromNotes(contact.notes)) {
+    const error = new Error('Invalid email')
+    error.statusCode = 401
+    throw error
+  }
+
   const hash = parseCustomerPasswordHashFromNotes(contact.notes)
-  if (!hash || !verifyPassword(password, hash)) {
-    const error = new Error('Invalid email or password')
+  if (!hash) {
+    const error = new Error('Invalid email')
+    error.statusCode = 401
+    throw error
+  }
+  if (!verifyPassword(password, hash)) {
+    const error = new Error('Invalid password')
     error.statusCode = 401
     throw error
   }

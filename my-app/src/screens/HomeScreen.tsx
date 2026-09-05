@@ -15,6 +15,8 @@ type Props = {
   onQueryChange: (value: string) => void
   onOpenProduct: (product: Product) => void
   onAddToCart: (product: Product) => void
+  cartCount?: number
+  onOpenCart?: () => void
   isMenuOpen: boolean
   onToggleMenu: () => void
   onCloseMenu: () => void
@@ -37,6 +39,8 @@ export function HomeScreen({
   onQueryChange,
   onOpenProduct,
   onAddToCart,
+  cartCount = 0,
+  onOpenCart,
   isMenuOpen,
   onToggleMenu,
   onCloseMenu,
@@ -92,6 +96,19 @@ export function HomeScreen({
           </div>
           <div className="header-actions">
             <NotificationsBell dark />
+            {onOpenCart ? (
+              <button
+                type="button"
+                className={`icon-btn icon-btn-dark${cartCount > 0 ? ' with-dot' : ''}`}
+                aria-label={cartCount > 0 ? `Open cart, ${cartCount} items` : 'Open cart'}
+                onClick={onOpenCart}
+              >
+                <span className="material-symbols-outlined">shopping_cart</span>
+                {cartCount > 0 ? (
+                  <span className="cart-icon-badge">{cartCount > 99 ? '99+' : cartCount}</span>
+                ) : null}
+              </button>
+            ) : null}
           </div>
         </div>
         <div className="hero-copy">
